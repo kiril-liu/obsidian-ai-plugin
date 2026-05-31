@@ -1,7 +1,7 @@
 {
-  "id": "prompt-ai-assistant",
-  "name": "Prompt AI-Assistant",
-  "version": "1.8.1",
+  "id": "vault-prompt-assistant",
+  "name": "Vault Prompt AI-Assistant",
+  "version": "1.8.2",
   "minAppVersion": "1.5.0",
   "description": "prompt workflow automation, batch runs, run history, external vector index storage, Daily Note workflows, prompt library, RAG, and source references.",
   "author": "Kiril",
