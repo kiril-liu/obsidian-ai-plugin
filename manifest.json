@@ -1,7 +1,7 @@
 {
   "id": "magic-wand-ai-assistant",
   "name": "Magic Wand AI Assistant",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "minAppVersion": "1.5.0",
   "description": "AI assistant for Obsidian with prompt workflow automation, batch runs, run history, external vector index storage, Daily Note workflows, prompt library, RAG, and source references.",
   "author": "Kiril",
