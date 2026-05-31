@@ -20,3 +20,48 @@ data.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# dependencies
+node_modules/
+
+# build output
+main.js
+main.js.map
+
+# local env
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Obsidian runtime/plugin data
+data.json
+index/
+vector-index.json
+index-meta.json
+
+# packaged files
+*.zip
+release/
+
+# temp/cache
+.cache/
+tmp/
+temp/
+
+# TypeScript cache
+*.tsbuildinfo
+
+

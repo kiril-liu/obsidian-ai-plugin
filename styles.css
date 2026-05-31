@@ -1,8 +1,317 @@
-/*
+.ai-chat-view {
+  height: 100%;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.ai-chat-header {
+  flex-shrink: 0;
+}
 
-If your plugin does not need CSS, delete this file.
+.ai-chat-header h2 {
+  margin-top: 0;
+  margin-bottom: 4px;
+}
 
-*/
+.ai-chat-desc,
+.ai-chat-index-status,
+.ai-chat-progress-empty,
+.ai-progress-current,
+.ai-prompt-suggestion-meta,
+.ai-chat-source-score,
+.ai-chat-source-line {
+  color: var(--text-muted);
+}
+
+.ai-chat-progress {
+  flex-shrink: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--background-secondary);
+}
+
+.ai-chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ai-chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--background-secondary);
+}
+
+.ai-chat-message {
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.ai-chat-sources {
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--background-secondary);
+}
+
+.ai-chat-sources-empty {
+  display: none;
+}
+
+.ai-chat-source-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--background-primary);
+}
+
+.ai-chat-source-path,
+.ai-chat-source-heading,
+.ai-prompt-suggestion-title {
+  font-weight: 600;
+}
+
+.ai-chat-source-excerpt {
+  white-space: pre-wrap;
+  font-size: 0.9em;
+  line-height: 1.45;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.ai-chat-input-area {
+  flex-shrink: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 8px;
+  background: var(--background-primary);
+}
+
+.ai-chat-input {
+  width: 100%;
+  height: 76px;
+  min-height: 76px;
+  max-height: 76px;
+  resize: none;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+.ai-chat-button-row,
+.ai-output-preview-buttons,
+.ai-prompt-suggestion-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-chat-button-row button {
+  flex-shrink: 0;
+}
+
+.ai-chat-rag-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.ai-progress-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ai-progress-header button {
+  margin-left: auto;
+}
+
+.ai-progress-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-progress-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.35;
+}
+
+.ai-progress-step-icon {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+}
+
+.ai-progress-step-running {
+  color: var(--text-accent);
+  font-weight: 600;
+}
+
+.ai-progress-step-failed {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+.ai-progress-step-cancelled {
+  color: var(--text-warning);
+  font-weight: 600;
+}
+
+.ai-output-preview-textarea {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.ai-output-preview-buttons {
+  justify-content: flex-end;
+}
+
+/* v1.6.2 增量样式 */
+.ai-chat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ai-chat-history-button {
+  font-weight: 600;
+}
+
+.ai-chat-new-button {
+  margin-left: auto;
+}
+
+.ai-chat-message-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+}
+
+.ai-chat-message-actions button {
+  font-size: 0.85em;
+}
+
+.ai-chat-history-modal {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.ai-chat-history-item {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--background-secondary);
+}
+
+.ai-chat-history-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ai-chat-history-time {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.ai-chat-history-preview {
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.ai-chat-history-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.ai-chat-source-card-simple {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.ai-chat-source-card-simple .ai-chat-source-path {
+  grid-column: 1;
+}
+
+.ai-chat-source-card-simple .ai-chat-source-line {
+  grid-column: 1;
+  font-size: 0.85em;
+}
+
+.ai-chat-source-card-simple button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.ai-chat-context-status {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 6px;
+  margin-bottom: 8px;
+  background: var(--background-secondary);
+  font-size: 0.9em;
+}
+
+.ai-chat-context-row {
+  display: flex;
+  gap: 6px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.ai-chat-context-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.ai-chat-context-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}

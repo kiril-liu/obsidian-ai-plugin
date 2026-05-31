@@ -1,92 +1,74 @@
-# Obsidian Sample Plugin
+# AI Assistant for Obsidian
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+AI Assistant 是一个面向 Obsidian 的 AI 助手插件，支持 Chat 对话、Vault 检索、RAG 语义问答、Prompt Library、Daily Note 工作流、批量 Prompt、历史对话和 AI 回答插入。
+当前稳定版本：`1.6.7`
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+Note:目前只测试了电脑版本，未测试向量库的功能，目前的Vault检索是依据关键词检索的。
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
+## 核心功能
 
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and outputs a Notice on click.
-- Registers a global interval which logs 'setInterval' to the console.
+### 1. AI Chat
+#### 1.侧边栏
+插件提供一个右侧 Chat 面板，用于和 AI 对话。
+#### 2.历史对话
+点击 Chat 顶部的 `历史对话` 可以查看最近对话。
+#### 3.Vault 检索
 
-## First time developing plugins?
+勾选 Chat 面板中的：
+使用 Vault 检索
+插件会尝试从当前 Vault 中查找相关内容，再交给 AI 回答。
 
-Quick starting guide for new plugin devs:
+检索顺序：
+1. 优先使用向量索引
+2. 如果没有索引或检索失败，自动回退关键词检索
+3. 文件名优先匹配
+4. 路径匹配
+5. 正文关键词匹配
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `src/main.ts` to `main.js`.
-- Make changes to `src/main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+#### 4. 参考来源简化显示
 
-## Releasing new releases
+Chat 参考来源区域只显示：
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+- 文件名
+- 相对路径
+- 打开按钮
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+### 2. Prompt Library
 
-## Adding your plugin to the community plugin list
+插件支持文本化 Prompt 模板。
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+- 默认 Prompt 文件： AI Copilot/Prompts.md
 
-## How to use
+- 也支持文件夹模式： AI Copilot/Prompts/
 
-- Clone this repo.
-- Make sure your NodeJS is at least v18 (`node --version`).
-- `npm i` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+- 可以在 Chat 中输入： /每日复盘
 
-## Manually installing the plugin
+#### 1. 日常生活 Prompt Pack
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+内置日常生活模板方向：
 
-## Improve code quality with eslint
+- 每日复盘
+- 明日计划
+- 周回顾
+- 最近 TODO 汇总
+- 读书笔记整理
+- 学习计划
+- 健身记录总结
+- 消费记录分析
+- 情绪日记整理
+- 旅行计划
 
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code.
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
+## 推荐使用流程
 
-## Funding URL
+### 第一次使用
 
-You can include funding URLs where people who use your plugin can financially support it.
+1. 安装插件
+2. 配置 API Key
+3. 配置模型
+4. 打开 AI Chat view
+5. 发送一个普通问题
+6. 创建 Prompt Library
+7. 构建 Vault vector index（可选，功能未测试）
+8. 勾选 `使用 Vault 检索`
+9. 测试 Vault 问答
 
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-	"fundingUrl": "https://buymeacoffee.com"
-}
-```
-
-If you have multiple URLs, you can also do:
-
-```json
-{
-	"fundingUrl": {
-		"Buy Me a Coffee": "https://buymeacoffee.com",
-		"GitHub Sponsor": "https://github.com/sponsors",
-		"Patreon": "https://www.patreon.com/"
-	}
-}
-```
-
-## API Documentation
-
-See https://docs.obsidian.md

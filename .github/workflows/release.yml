@@ -1,50 +1,50 @@
 name: Release Obsidian plugin
 
 on:
-    push:
-        tags:
-            - '*'
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
 
 jobs:
-    build:
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-            id-token: write
-            attestations: write
-        steps:
-            - uses: actions/checkout@v6
+  release:
+    runs-on: ubuntu-latest
 
-            - name: Use Node.js
-              uses: actions/setup-node@v6
-              with:
-                  node-version: 24
-                  cache: 'npm'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-            - name: Build plugin
-              run: |
-                  npm ci
-                  npm run build
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-            - name: Check for optional styles
-              id: styles
-              run: |
-                  [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: npm ci
 
-            - name: Attest build provenance
-              uses: actions/attest@v4
-              with:
-                  subject-path: |
-                      main.js
-                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+      - name: Format source
+        run: npx prettier --write "src/**/*.ts" "*.json" "*.md" "*.css"
 
-            - name: Create release
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  tag="${GITHUB_REF#refs/tags/}"
+      - name: Build plugin
+        run: npm run build
 
-                  gh release create "$tag" \
-                    --title="$tag" \
-                    --draft \
-                    main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+      - name: Create release package
+        run: |
+          mkdir release
+          cp main.js manifest.json styles.css release/
+          cd release
+          zip obsidian-ai-copilot.zip main.js manifest.json styles.css
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            main.js
+            manifest.json
+            styles.css
+            release/obsidian-ai-copilot.zip
+        env:
+          GITHUB_TOKEN: $ secrets.GITHUB_TOKEN 

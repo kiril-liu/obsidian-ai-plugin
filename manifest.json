@@ -1,11 +1,11 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "1.0.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+  "id": "ai-assistant",
+  "name": "Aissistant",
+  "version": "1.6.7",
+  "minAppVersion": "1.5.0",
+  "description": "AI assistant for Obsidian with prompt workflow automation, batch runs, run history, external vector index storage, Daily Note workflows, prompt library, RAG, and source references.",
+  "author": "Kiril",
+  "icon": "wand-sparkles",
+  "authorUrl": "https://github.com/kiril-liu",
+  "isDesktopOnly": false
 }

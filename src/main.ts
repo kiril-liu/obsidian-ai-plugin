@@ -1,114 +1,292 @@
+import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { AiClient } from "./ai/AiClient";
+import { EmbeddingClient } from "./ai/EmbeddingClient";
+import { registerDailyCommands } from "./commands/dailyCommands";
+import { registerNoteCommands } from "./commands/noteCommands";
+import { registerPromptCommands } from "./commands/promptCommands";
+import { registerVaultCommands } from "./commands/vaultCommands";
+import { registerWorkflowCommands } from "./commands/workflowCommands";
+import { DailyNoteManager } from "./daily/DailyNoteManager";
+import { PromptRunHistory } from "./history/PromptRunHistory";
+import { IndexStorage } from "./index/IndexStorage";
+import { ProgressTracker } from "./progress/ProgressTracker";
+import { PromptManager } from "./prompts/PromptManager";
+import { HybridSearch } from "./rag/HybridSearch";
+import { KeywordSearch } from "./rag/KeywordSearch";
+import { VectorStore } from "./rag/VectorStore";
+import { VaultIndexer } from "./rag/VaultIndexer";
+import { DEFAULT_SETTINGS, AiSettingsTab } from "./settings";
 import {
-	Editor,
-	MarkdownView,
-	MarkdownFileInfo,
-	Modal,
-	Notice,
-	Plugin,
-} from 'obsidian';
-import {
-	DEFAULT_SETTINGS,
-	MyPluginSettings,
-	SampleSettingTab,
-} from './settings';
+  AiPluginSettings,
+  ChatConversation,
+  ChatMessage,
+  IndexLogEntry,
+  PluginData,
+} from "./types";
+import { AI_CHAT_VIEW_TYPE, AiChatView } from "./views/AiChatView";
+import { BatchPromptRunner } from "./workflows/BatchPromptRunner";
+import { PromptCommandRegistry } from "./workflows/PromptCommandRegistry";
 
-// Remember to rename these classes and interfaces!
+export default class AiPlugin extends Plugin {
+  settings: AiPluginSettings;
+  loadedData: PluginData | null = null;
 
-export default class MyPlugin extends Plugin {
-	settings!: MyPluginSettings;
+  aiClient: AiClient;
+  embeddingClient: EmbeddingClient;
+  keywordSearch: KeywordSearch;
+  vectorStore: VectorStore;
+  vaultIndexer: VaultIndexer;
+  indexStorage: IndexStorage;
+  hybridSearch: HybridSearch;
+  promptManager: PromptManager;
+  progressTracker: ProgressTracker;
+  dailyNoteManager: DailyNoteManager;
+  promptRunHistory: PromptRunHistory;
+  promptCommandRegistry: PromptCommandRegistry;
+  batchPromptRunner: BatchPromptRunner;
 
-	async onload() {
-		await this.loadSettings();
+  chatHistory: ChatMessage[] = [];
+  chatConversations: ChatConversation[] = [];
+  activeChatId = "";
+  indexLogs: IndexLogEntry[] = [];
+  lastIndexError = "";
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+  async onload() {
+    const data = ((await this.loadData()) ?? {}) as PluginData;
+    this.loadedData = data;
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+    this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
+    this.chatHistory = data.chatHistory ?? [];
+    this.chatConversations = data.chatConversations ?? [];
+    this.activeChatId = data.activeChatId ?? "";
+    this.indexLogs = data.indexLogs ?? [];
+    this.lastIndexError = data.lastIndexError ?? "";
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			},
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (
-				editor: Editor,
-				_ctx: MarkdownView | MarkdownFileInfo,
-			) => {
-				editor.replaceSelection('Sample editor command');
-			},
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+    this.aiClient = new AiClient(this);
+    this.embeddingClient = new EmbeddingClient(this);
+    this.keywordSearch = new KeywordSearch(this);
+    this.vectorStore = new VectorStore();
+    this.indexStorage = new IndexStorage(this);
+    this.hybridSearch = new HybridSearch(this);
+    this.vaultIndexer = new VaultIndexer(this);
+    this.promptManager = new PromptManager(this);
+    this.progressTracker = new ProgressTracker(this);
+    this.dailyNoteManager = new DailyNoteManager(this);
+    this.promptRunHistory = new PromptRunHistory(this);
+    this.promptRunHistory.load(data.promptRunHistory ?? []);
+    this.promptCommandRegistry = new PromptCommandRegistry(this);
+    this.batchPromptRunner = new BatchPromptRunner(this);
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			},
-		});
+    this.ensureActiveConversation();
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+    this.registerView(
+      AI_CHAT_VIEW_TYPE,
+      (leaf: WorkspaceLeaf) => new AiChatView(leaf, this),
+    );
+	
+	this.addRibbonIcon("wand-sparkles", "Open AI Copilot", async () => {
+	await this.activateChatView();
+	});
+	
+    registerNoteCommands(this);
+    registerVaultCommands(this);
+    registerPromptCommands(this);
+    registerDailyCommands(this);
+    registerWorkflowCommands(this);
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(activeDocument, 'click', (_evt: MouseEvent) => {
-			new Notice('Click');
-		});
+    this.addSettingTab(new AiSettingsTab(this.app, this));
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(
-			window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000),
-		);
-	}
+    await this.vaultIndexer.loadIndexOnStartup();
 
-	onunload() {}
+    if (this.settings.enablePromptCommandRegistration) {
+      await this.promptCommandRegistry.registerPromptTemplateCommands();
+    }
 
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<MyPluginSettings>,
-		);
-	}
+    if (this.settings.autoUpdateIndexOnStartup) {
+      setTimeout(() => this.vaultIndexer.updateVectorIndex(), 2000);
+    }
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
+    new Notice("AI Copilot 已加载");
+  }
 
-class SampleModal extends Modal {
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
-	}
+  onunload() {
+    this.app.workspace.detachLeavesOfType(AI_CHAT_VIEW_TYPE);
+  }
 
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
+  async saveSettings() {
+    await this.saveAllData();
+  }
+
+  async saveAllData() {
+    await this.saveData({
+      settings: this.settings,
+      vectorIndex: this.settings.enableExternalIndexStorage
+        ? null
+        : this.vectorStore.getIndex(),
+      chatHistory: this.chatHistory,
+      chatConversations: this.chatConversations,
+      activeChatId: this.activeChatId,
+      indexLogs: this.indexLogs,
+      lastIndexError: this.lastIndexError,
+      promptRunHistory: this.promptRunHistory.entries,
+    });
+  }
+
+  ensureActiveConversation() {
+    if (
+      this.activeChatId &&
+      this.chatConversations.some((item) => item.id === this.activeChatId)
+    ) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const conversation: ChatConversation = {
+      id: crypto.randomUUID(),
+      title: "新对话",
+      messages: this.chatHistory ?? [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.activeChatId = conversation.id;
+    this.chatConversations.unshift(conversation);
+  }
+
+  syncActiveConversation() {
+    this.ensureActiveConversation();
+
+    const conversation = this.chatConversations.find(
+      (item) => item.id === this.activeChatId,
+    );
+    if (!conversation) return;
+
+    conversation.messages = this.chatHistory;
+    conversation.updatedAt = new Date().toISOString();
+    conversation.title = this.buildConversationTitle(this.chatHistory);
+  }
+
+  buildConversationTitle(messages: ChatMessage[]) {
+    const firstUserMessage = messages.find((message) => message.role === "你");
+    if (!firstUserMessage) return "新对话";
+    return firstUserMessage.content.slice(0, 24) || "新对话";
+  }
+
+  async startNewChatConversation() {
+    this.syncActiveConversation();
+
+    const now = new Date().toISOString();
+    const conversation: ChatConversation = {
+      id: crypto.randomUUID(),
+      title: "新对话",
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.chatConversations.unshift(conversation);
+    this.activeChatId = conversation.id;
+    this.chatHistory = [];
+
+    await this.saveAllData();
+    this.refreshChatViews();
+  }
+
+  async restoreChatConversation(conversationId: string) {
+    this.syncActiveConversation();
+
+    const conversation = this.chatConversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation) return;
+
+    this.activeChatId = conversation.id;
+    this.chatHistory = [...conversation.messages];
+
+    await this.saveAllData();
+    this.refreshChatViews();
+  }
+
+  addChatMessage(role: "你" | "AI", content: string) {
+    this.chatHistory.push({
+      role,
+      content,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (this.chatHistory.length > this.settings.chatHistoryMaxMessages) {
+      this.chatHistory = this.chatHistory.slice(
+        this.chatHistory.length - this.settings.chatHistoryMaxMessages,
+      );
+    }
+
+    this.syncActiveConversation();
+    this.saveAllData();
+    this.refreshChatViews();
+  }
+
+  addIndexLog(level: "info" | "warn" | "error", message: string) {
+    this.indexLogs.push({
+      level,
+      message,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (this.indexLogs.length > this.settings.indexLogMaxEntries) {
+      this.indexLogs = this.indexLogs.slice(
+        this.indexLogs.length - this.settings.indexLogMaxEntries,
+      );
+    }
+
+    this.saveAllData();
+  }
+
+  shouldExcludePath(path: string) {
+    const excluded = this.settings.excludedFolders
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return excluded.some(
+      (folder) => path.startsWith(folder + "/") || path === folder,
+    );
+  }
+
+  limitText(text: string, max = 12000) {
+    if (text.length <= max) return text;
+    return text.slice(0, max) + "\n\n……内容过长，已截断。";
+  }
+
+  async activateChatView() {
+    const leaves = this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE);
+
+    if (leaves.length > 0) {
+      this.app.workspace.revealLeaf(leaves[0]);
+      return;
+    }
+
+    const leaf = this.app.workspace.getRightLeaf(false);
+
+    if (!leaf) {
+      new Notice("无法打开 AI Chat 面板");
+      return;
+    }
+
+    await leaf.setViewState({ type: AI_CHAT_VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  refreshChatViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view instanceof AiChatView) view.renderMessages();
+    }
+  }
+
+  refreshProgressViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view instanceof AiChatView) view.renderProgress();
+    }
+  }
 }
