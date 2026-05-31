@@ -1,6 +1,6 @@
 {
   "id": "obsidian-ai-assistant",
-  "name": "Aissistant",
+  "name": "Assistant",
   "version": "1.6.7",
   "minAppVersion": "1.5.0",
   "description": "AI assistant for Obsidian with prompt workflow automation, batch runs, run history, external vector index storage, Daily Note workflows, prompt library, RAG, and source references.",
