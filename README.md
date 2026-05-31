@@ -7,11 +7,15 @@ Note:目前只测试了电脑版本，未测试向量库的功能，目前的Vau
 
 ## 核心功能
 
+[基本命令](./screenshoot/commands.png)
+
 ### 1. AI Chat
 #### 1.侧边栏
 插件提供一个右侧 Chat 面板，用于和 AI 对话。
+[聊天截图](./screenshoot/overview.png)
 #### 2.历史对话
 点击 Chat 顶部的 `历史对话` 可以查看最近对话。
+[历史对话](./screenshoot/historychat.png)
 #### 3.Vault 检索
 
 勾选 Chat 面板中的：
@@ -42,6 +46,8 @@ Chat 参考来源区域只显示：
 - 也支持文件夹模式： AI Copilot/Prompts/
 
 - 可以在 Chat 中输入： /每日复盘
+[提示词命令](./screenshoot/prompt.png)
+
 
 #### 1. 日常生活 Prompt Pack
 
