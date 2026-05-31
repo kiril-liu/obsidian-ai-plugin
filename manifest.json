@@ -1,11 +1,11 @@
 {
-  "id": "magic-wand-ai-assistant",
-  "name": "Magic Wand AI Assistant",
-  "version": "1.8.0",
+  "id": "prompt-ai-assistant",
+  "name": "Prompt AI-Assistant",
+  "version": "1.8.1",
   "minAppVersion": "1.5.0",
   "description": "prompt workflow automation, batch runs, run history, external vector index storage, Daily Note workflows, prompt library, RAG, and source references.",
   "author": "Kiril",
-  "icon": "wand-sparkles",
+  "icon": "bot",
   "authorUrl": "https://github.com/kiril-liu",
   "isDesktopOnly": false
 }
