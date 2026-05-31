@@ -25,9 +25,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Format source
-        run: npx prettier --write "src/**/*.ts" "*.json" "*.md" "*.css"
-
       - name: Build plugin
         run: npm run build
 

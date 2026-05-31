@@ -48,7 +48,6 @@ pnpm-debug.log*
 
 # Obsidian runtime/plugin data
 data.json
-index/
 vector-index.json
 index-meta.json
 
