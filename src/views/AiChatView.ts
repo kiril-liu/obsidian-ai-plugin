@@ -1,9 +1,9 @@
-import { ItemView, MarkdownView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { FuzzySuggestModal, ItemView, MarkdownView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import AiPlugin from "../main";
 import { ErrorFormatter } from "../errors/ErrorFormatter";
 import { ChatHistoryModal } from "../history/ChatHistoryModal";
 import { SourceFormatter } from "../rag/SourceFormatter";
-import { ChatMessage } from "../types";
+import { ChatMessage, PromptTemplate } from "../types";
 
 export const AI_CHAT_VIEW_TYPE = "ai-copilot-chat-view";
 
@@ -24,6 +24,10 @@ export class AiChatView extends ItemView {
 	useRagEl: HTMLInputElement;
 	lastMarkdownView: MarkdownView | null = null;
 	activePromptName = "普通提问";
+	promptFileButtonEl: HTMLButtonElement;
+	promptSelectEl: HTMLSelectElement;
+	selectedPromptFile: string | null = null;
+	promptTemplates: PromptTemplate[] = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: AiPlugin) {
 		super(leaf);
@@ -74,6 +78,12 @@ export class AiChatView extends ItemView {
 			this.renderContextStatus();
 		};
 
+		this.promptFileButtonEl = titleRow.createEl("button", {
+			cls: "ai-chat-prompt-file-button",
+		});
+		this.promptFileButtonEl.onclick = () => this.openPromptFilePicker();
+		this.renderPromptFileButton();
+
 		this.statusEl = headerEl.createDiv("ai-chat-context-status");
 
 		this.progressEl = container.createDiv("ai-chat-progress");
@@ -106,6 +116,9 @@ export class AiChatView extends ItemView {
 			this.renderContextStatus();
 		};
 
+		this.promptSelectEl = row.createEl("select", { cls: "ai-chat-prompt-select" });
+		this.renderPromptSelect();
+
 		row.createEl("button", { text: "发送", cls: "mod-cta" }).onclick = () => this.send(this.useRagEl.checked);
 		row.createEl("button", { text: "取消" }).onclick = () => this.plugin.progressTracker.cancel();
 		row.createEl("button", { text: "清空" }).onclick = async () => {
@@ -124,6 +137,22 @@ export class AiChatView extends ItemView {
 	}
 
 	async send(useRag = false) {
+		const selectedPrompt = this.promptSelectEl?.value ?? "";
+
+		if (selectedPrompt) {
+			this.rememberCurrentMarkdownView();
+			const typed = this.inputEl.value.trim();
+
+			if (typed) {
+				this.inputEl.value = "";
+				this.plugin.addChatMessage("你", typed);
+				this.renderMessages();
+			}
+
+			await this.runSelectedPrompt(selectedPrompt);
+			return;
+		}
+
 		const question = this.inputEl.value.trim();
 		if (!question) return;
 
@@ -224,19 +253,10 @@ export class AiChatView extends ItemView {
 		const file = markdownView?.file instanceof TFile ? markdownView.file : null;
 
 		const fileName = file?.name ?? "未检测到 Markdown 笔记";
-		const path = file?.path ?? "请先打开一个 Markdown 笔记";
 
 		const fileRow = this.statusEl.createDiv("ai-chat-context-row");
 		fileRow.createSpan({ text: "当前文件：", cls: "ai-chat-context-label" });
 		fileRow.createSpan({ text: fileName, cls: "ai-chat-context-value" });
-
-		const pathRow = this.statusEl.createDiv("ai-chat-context-row");
-		pathRow.createSpan({ text: "路径：", cls: "ai-chat-context-label" });
-		pathRow.createSpan({ text: path, cls: "ai-chat-context-value" });
-
-		const promptRow = this.statusEl.createDiv("ai-chat-context-row");
-		promptRow.createSpan({ text: "当前 Prompt：", cls: "ai-chat-context-label" });
-		promptRow.createSpan({ text: this.activePromptName || "普通提问", cls: "ai-chat-context-value" });
 	}
 
 	rememberCurrentMarkdownView() {
@@ -312,6 +332,86 @@ export class AiChatView extends ItemView {
 		await runPromptTemplate(this.plugin, template);
 	}
 
+	async runSelectedPrompt(name: string) {
+		const template =
+			this.promptTemplates.find((item) => item.name === name) ??
+			(await this.plugin.promptManager.getTemplateByName(name));
+
+		if (!template) {
+			new Notice(`没有找到 Prompt 模板：${name}`);
+			return;
+		}
+
+		this.activePromptName = template.name;
+		const { runPromptTemplate } = await import("../commands/promptCommands");
+		await runPromptTemplate(this.plugin, template);
+		this.renderMessages();
+	}
+
+	getPromptFileName(path: string | null) {
+		if (!path) return "无";
+		return path.split("/").pop()?.replace(/\.md$/, "") ?? path;
+	}
+
+	renderPromptFileButton() {
+		if (!this.promptFileButtonEl) return;
+		this.promptFileButtonEl.setText(`提示词文件：${this.getPromptFileName(this.selectedPromptFile)}`);
+	}
+
+	async openPromptFilePicker() {
+		const templates = await this.plugin.promptManager.loadTemplates(true);
+		this.promptTemplates = templates;
+
+		const files = Array.from(new Set(templates.map((template) => template.sourcePath))).sort((a, b) =>
+			a.localeCompare(b)
+		);
+
+		if (files.length === 0) {
+			new Notice("没有找到任何提示词文件，请先在设置中创建 Prompt Library");
+			return;
+		}
+
+		const view = this;
+
+		const modal = new (class extends FuzzySuggestModal<string> {
+			getItems() {
+				return ["无", ...files];
+			}
+
+			getItemText(item: string) {
+				return item === "无" ? "无（不指定提示词文件）" : view.getPromptFileName(item);
+			}
+
+			onChooseItem(item: string) {
+				view.selectedPromptFile = item === "无" ? null : item;
+				view.renderPromptFileButton();
+				view.renderPromptSelect();
+			}
+		})(this.app);
+
+		modal.setPlaceholder("选择一个提示词文件");
+		modal.open();
+	}
+
+	renderPromptSelect() {
+		if (!this.promptSelectEl) return;
+
+		this.promptSelectEl.empty();
+		this.promptSelectEl.createEl("option", { text: "无", value: "" });
+
+		const names = this.selectedPromptFile
+			? this.promptTemplates
+					.filter((template) => template.sourcePath === this.selectedPromptFile)
+					.map((template) => template.name)
+			: [];
+
+		for (const name of names) {
+			this.promptSelectEl.createEl("option", { text: name, value: name });
+		}
+
+		this.promptSelectEl.value = "";
+	}
+
 	renderMessages() {
 		if (!this.messagesEl) return;
 
@@ -321,13 +421,43 @@ export class AiChatView extends ItemView {
 			this.renderMessage(message);
 		}
 
-		this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+		this.scrollLatestUserMessageToTop();
+	}
+
+	scrollLatestUserMessageToTop() {
+		if (!this.messagesEl) return;
+
+		// 先清掉旧的底部占位，量出真实内容高度
+		this.messagesEl.querySelectorAll(".ai-chat-scroll-spacer").forEach((el) => el.remove());
+
+		const userMessages = this.messagesEl.querySelectorAll<HTMLElement>(".ai-chat-message-user");
+		const last = userMessages[userMessages.length - 1];
+
+		if (!last) {
+			this.messagesEl.scrollTop = 0;
+			return;
+		}
+
+		// 要让最新消息能滚到顶部，需要 scrollHeight >= last.offsetTop + clientHeight。
+		// 内容不够时，补一个底部占位块。
+		const needed = last.offsetTop + this.messagesEl.clientHeight - this.messagesEl.scrollHeight;
+
+		if (needed > 0) {
+			const spacer = this.messagesEl.createDiv("ai-chat-scroll-spacer");
+			spacer.style.height = `${needed}px`;
+		}
+
+		this.messagesEl.scrollTop = last.offsetTop;
 	}
 
 	renderMessage(message: ChatMessage) {
-		const el = this.messagesEl.createDiv("ai-chat-message");
-		el.createEl("strong", { text: `${message.role}：` });
-		el.createSpan({ text: message.content });
+		const isUser = message.role === "你";
+		const el = this.messagesEl.createDiv(
+			isUser ? "ai-chat-message ai-chat-message-user" : "ai-chat-message ai-chat-message-ai"
+		);
+
+		const bubble = el.createDiv("ai-chat-bubble");
+		bubble.createSpan({ text: message.content });
 
 		if (message.role === "AI") {
 			const actions = el.createDiv("ai-chat-message-actions");
