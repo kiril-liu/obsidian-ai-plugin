@@ -1,4 +1,4 @@
-import { FuzzySuggestModal, ItemView, MarkdownRenderer, MarkdownView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { App, Component, ItemView, MarkdownRenderer, MarkdownView, Modal, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import AiPlugin from "../main";
 import { ErrorFormatter } from "../errors/ErrorFormatter";
 import { ChatHistoryModal } from "../history/ChatHistoryModal";
@@ -15,88 +15,96 @@ type CurrentNoteContext = {
 	selection: string;
 };
 
-export class AiChatView extends ItemView {
+export class ChatPanel {
 	plugin: AiPlugin;
+	app: App;
+	host: Component;
+	containerEl: HTMLElement;
 	messagesEl: HTMLElement;
 	inputEl: HTMLTextAreaElement;
 	sourcesEl: HTMLElement;
-	progressEl: HTMLElement;
 	statusEl: HTMLElement;
-	useRagEl: HTMLInputElement;
+	useRag = false;
+	vaultSearchButtonEl: HTMLButtonElement;
+	progressPercentEl: HTMLElement;
+	sendButtonEl: HTMLButtonElement;
 	lastMarkdownView: MarkdownView | null = null;
 	activePromptName = "普通提问";
 	promptFileButtonEl: HTMLButtonElement;
-	promptSelectEl: HTMLSelectElement;
 	selectedPromptFile: string | null = null;
+	selectedPromptName: string | null = null;
 	promptTemplates: PromptTemplate[] = [];
 	noteActionManager: NoteActionManager;
 	renderedMessages: ChatMessage[] = [];
 
-	constructor(leaf: WorkspaceLeaf, plugin: AiPlugin) {
-		super(leaf);
+	constructor(plugin: AiPlugin, host: Component, app: App) {
 		this.plugin = plugin;
-		this.noteActionManager = new NoteActionManager(this.app);
+		this.host = host;
+		this.app = app;
+		this.noteActionManager = new NoteActionManager(app);
 	}
 
-	getViewType() {
-		return AI_CHAT_VIEW_TYPE;
-	}
-
-	getDisplayText() {
-		return "AI Copilot";
-	}
-
-	getIcon() {
-		return "sparkles";
-	}
-
-	async onOpen() {
-		const container = this.containerEl.children[1];
-		container.empty();
-		container.addClass("ai-chat-view");
+	mount(containerEl: HTMLElement) {
+		this.containerEl = containerEl;
+		containerEl.empty();
+		containerEl.addClass("ai-chat-view");
 
 		this.rememberCurrentMarkdownView();
-		this.registerEvent(
+		this.host.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => {
 				this.rememberCurrentMarkdownView();
 				this.renderContextStatus();
 			})
 		);
 
-		const headerEl = container.createDiv("ai-chat-header");
+		const headerEl = containerEl.createDiv("ai-chat-header");
 		const titleRow = headerEl.createDiv("ai-chat-title-row");
 
 		const historyButton = titleRow.createEl("button", {
-			text: "历史对话",
-			cls: "ai-chat-history-button",
+			cls: "clickable-icon ai-chat-icon-button ai-chat-history-button",
 		});
+		setIcon(historyButton, "history");
+		historyButton.setAttribute("aria-label", "历史对话");
 		historyButton.onclick = () => new ChatHistoryModal(this.app, this.plugin).open();
 
-		titleRow.createEl("button", {
-			text: "新建对话",
-			cls: "ai-chat-new-button",
-		}).onclick = async () => {
+		const newButton = titleRow.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-new-button",
+		});
+		setIcon(newButton, "message-square-plus");
+		newButton.setAttribute("aria-label", "新建对话");
+		newButton.onclick = async () => {
 			await this.plugin.startNewChatConversation();
 			this.renderMessages();
 			this.renderSources([]);
 			this.renderContextStatus();
 		};
 
-		this.promptFileButtonEl = titleRow.createEl("button", {
-			cls: "ai-chat-prompt-file-button",
+		this.statusEl = titleRow.createDiv("ai-chat-context-status");
+
+		this.vaultSearchButtonEl = titleRow.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-vault-button",
 		});
-		this.promptFileButtonEl.onclick = () => this.openPromptFilePicker();
+		setIcon(this.vaultSearchButtonEl, "search");
+		this.attachTapAndLongPress(
+			this.vaultSearchButtonEl,
+			() => this.setUseRag(!this.useRag),
+			() => this.plugin.openVaultSearchSettings()
+		);
+
+		this.progressPercentEl = titleRow.createSpan({ cls: "ai-chat-progress-percent" });
+		this.renderVaultSearchButton();
+
+		this.promptFileButtonEl = titleRow.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-prompt-file-button",
+		});
+		this.promptFileButtonEl.onclick = () => this.openPromptPicker();
 		this.renderPromptFileButton();
 
-		this.statusEl = headerEl.createDiv("ai-chat-context-status");
-
-		this.progressEl = container.createDiv("ai-chat-progress");
-
-		const bodyEl = container.createDiv("ai-chat-body");
+		const bodyEl = containerEl.createDiv("ai-chat-body");
 		this.messagesEl = bodyEl.createDiv("ai-chat-messages");
 		this.sourcesEl = bodyEl.createDiv("ai-chat-sources");
 
-		const inputArea = container.createDiv("ai-chat-input-area");
+		const inputArea = containerEl.createDiv("ai-chat-input-area");
 
 		this.inputEl = inputArea.createEl("textarea", {
 			cls: "ai-chat-input",
@@ -106,42 +114,46 @@ export class AiChatView extends ItemView {
 		this.inputEl.addEventListener("keydown", async (event) => {
 			if (event.key === "Enter" && !event.shiftKey) {
 				event.preventDefault();
-				await this.send(this.useRagEl.checked);
+				await this.send(this.useRag);
 			}
 		});
 
-		const row = inputArea.createDiv("ai-chat-button-row");
+		// 发送/取消图标收进输入框方框内（底部靠右），不再单独占一行
+		const inputActions = inputArea.createDiv("ai-chat-input-actions");
 
-		const ragLabel = row.createEl("label", { cls: "ai-chat-rag-toggle" });
-		this.useRagEl = ragLabel.createEl("input", { type: "checkbox" });
-		ragLabel.createSpan({ text: "使用 Vault 检索" });
-		this.useRagEl.onchange = () => {
-			this.activePromptName = this.useRagEl.checked ? "普通提问 + Vault 检索" : "普通提问";
-			this.renderContextStatus();
-		};
+		const cancelButton = inputActions.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-cancel-button",
+		});
+		setIcon(cancelButton, "x");
+		cancelButton.setAttribute("aria-label", "取消");
+		cancelButton.onclick = () => this.plugin.progressTracker.cancel();
 
-		this.promptSelectEl = row.createEl("select", { cls: "ai-chat-prompt-select" });
-		this.renderPromptSelect();
-
-		row.createEl("button", { text: "发送", cls: "mod-cta" }).onclick = () => this.send(this.useRagEl.checked);
-		row.createEl("button", { text: "取消" }).onclick = () => this.plugin.progressTracker.cancel();
-		row.createEl("button", { text: "清空" }).onclick = async () => {
-			this.plugin.chatHistory = [];
-			this.plugin.syncActiveConversation();
-			await this.plugin.saveAllData();
-			this.renderMessages();
-			this.renderSources([]);
-			this.renderContextStatus();
-		};
+		this.sendButtonEl = inputActions.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-send-button",
+		});
+		setIcon(this.sendButtonEl, "send");
+		this.sendButtonEl.setAttribute("aria-label", "发送");
+		this.sendButtonEl.onclick = () => this.send(this.useRag);
 
 		this.renderContextStatus();
 		this.renderProgress();
 		this.renderMessages();
 		this.renderSources([]);
+
+		this.plugin.registerChatPanel(this);
+	}
+
+	unmount() {
+		this.plugin.unregisterChatPanel(this);
 	}
 
 	async send(useRag = false) {
-		const selectedPrompt = this.promptSelectEl?.value ?? "";
+		if (this.plugin.progressTracker.getState()?.active) {
+			new Notice("AI 正在响应，请稍候…");
+			return;
+		}
+
+		const selectedPrompt = this.selectedPromptName ?? "";
 
 		if (selectedPrompt) {
 			this.rememberCurrentMarkdownView();
@@ -281,11 +293,13 @@ export class AiChatView extends ItemView {
 		const markdownView = this.findCurrentMarkdownView();
 		const file = markdownView?.file instanceof TFile ? markdownView.file : null;
 
-		const fileName = file?.name ?? "未检测到 Markdown 笔记";
+		// 极简单行：仅灰色文件名（去掉后缀、无图标无方框）；完整路径放在 tooltip
+		this.statusEl.createSpan({
+			text: file ? file.basename : "未检测到笔记",
+			cls: "ai-chat-context-value",
+		});
 
-		const fileRow = this.statusEl.createDiv("ai-chat-context-row");
-		fileRow.createSpan({ text: "当前文件：", cls: "ai-chat-context-label" });
-		fileRow.createSpan({ text: fileName, cls: "ai-chat-context-value" });
+		this.statusEl.setAttribute("aria-label", file ? file.path : "未检测到 Markdown 笔记");
 	}
 
 	rememberCurrentMarkdownView() {
@@ -396,61 +410,91 @@ export class AiChatView extends ItemView {
 
 	renderPromptFileButton() {
 		if (!this.promptFileButtonEl) return;
-		this.promptFileButtonEl.setText(`提示词文件：${this.getPromptFileName(this.selectedPromptFile)}`);
+		setIcon(this.promptFileButtonEl, "library");
+		const fileName = this.getPromptFileName(this.selectedPromptFile);
+		const promptName = this.selectedPromptName ?? "无";
+		this.promptFileButtonEl.setAttribute("aria-label", `提示词文件：${fileName}　提示词：${promptName}`);
+		this.promptFileButtonEl.toggleClass("is-active", !!this.selectedPromptName);
 	}
 
-	async openPromptFilePicker() {
+	async openPromptPicker() {
 		const templates = await this.plugin.promptManager.loadTemplates(true);
 		this.promptTemplates = templates;
 
-		const files = Array.from(new Set(templates.map((template) => template.sourcePath))).sort((a, b) =>
-			a.localeCompare(b)
-		);
-
-		if (files.length === 0) {
+		if (templates.length === 0) {
 			new Notice("没有找到任何提示词文件，请先在设置中创建 Prompt Library");
 			return;
 		}
 
-		const view = this;
-
-		const modal = new (class extends FuzzySuggestModal<string> {
-			getItems() {
-				return ["无", ...files];
-			}
-
-			getItemText(item: string) {
-				return item === "无" ? "无（不指定提示词文件）" : view.getPromptFileName(item);
-			}
-
-			onChooseItem(item: string) {
-				view.selectedPromptFile = item === "无" ? null : item;
-				view.renderPromptFileButton();
-				view.renderPromptSelect();
-			}
-		})(this.app);
-
-		modal.setPlaceholder("选择一个提示词文件");
-		modal.open();
+		new PromptPickerModal(this.app, this).open();
 	}
 
-	renderPromptSelect() {
-		if (!this.promptSelectEl) return;
+	setSelectedPrompt(file: string | null, name: string | null) {
+		this.selectedPromptFile = file;
+		this.selectedPromptName = name;
+		this.activePromptName = name ?? (this.useRag ? "普通提问 + Vault 检索" : "普通提问");
+		this.renderPromptFileButton();
+		this.renderContextStatus();
+	}
 
-		this.promptSelectEl.empty();
-		this.promptSelectEl.createEl("option", { text: "无", value: "" });
-
-		const names = this.selectedPromptFile
-			? this.promptTemplates
-					.filter((template) => template.sourcePath === this.selectedPromptFile)
-					.map((template) => template.name)
-			: [];
-
-		for (const name of names) {
-			this.promptSelectEl.createEl("option", { text: name, value: name });
+	setUseRag(value: boolean) {
+		this.useRag = value;
+		if (!this.selectedPromptName) {
+			this.activePromptName = value ? "普通提问 + Vault 检索" : "普通提问";
 		}
+		this.renderVaultSearchButton();
+		this.renderContextStatus();
+	}
 
-		this.promptSelectEl.value = "";
+	renderVaultSearchButton() {
+		if (!this.vaultSearchButtonEl) return;
+		this.vaultSearchButtonEl.toggleClass("is-active", this.useRag);
+		this.vaultSearchButtonEl.setAttribute(
+			"aria-label",
+			this.useRag ? "Vault 检索：开（长按/右键设置）" : "Vault 检索：关（长按/右键设置）"
+		);
+	}
+
+	attachTapAndLongPress(el: HTMLElement, onTap: () => void, onLongPress: () => void) {
+		let timer: number | null = null;
+		let longFired = false;
+
+		const cancel = () => {
+			if (timer !== null) {
+				window.clearTimeout(timer);
+				timer = null;
+			}
+		};
+
+		el.addEventListener(
+			"touchstart",
+			() => {
+				longFired = false;
+				timer = window.setTimeout(() => {
+					longFired = true;
+					timer = null;
+					onLongPress();
+				}, 500);
+			},
+			{ passive: true }
+		);
+		el.addEventListener("touchmove", cancel);
+		el.addEventListener("touchcancel", cancel);
+		el.addEventListener("touchend", cancel);
+
+		el.addEventListener("click", (event) => {
+			if (longFired) {
+				longFired = false;
+				event.preventDefault();
+				return;
+			}
+			onTap();
+		});
+
+		el.addEventListener("contextmenu", (event) => {
+			event.preventDefault();
+			onLongPress();
+		});
 	}
 
 	renderMessages() {
@@ -525,18 +569,28 @@ export class AiChatView extends ItemView {
 		const bubble = el.createDiv("ai-chat-bubble");
 
 		if (message.role === "AI") {
-			MarkdownRenderer.render(this.app, message.content, bubble, "", this);
+			MarkdownRenderer.render(this.app, message.content, bubble, "", this.host);
 
 			const isStatus = message.content.startsWith("✅ ") || message.content.startsWith("⚠️ ");
 
 			if (!isStatus) {
 				const actions = el.createDiv("ai-chat-message-actions");
 
-				actions.createEl("button", { text: "插入到光标" }).onclick = () => {
+				const insertButton = actions.createEl("button", {
+					cls: "clickable-icon ai-chat-icon-button ai-chat-message-action",
+				});
+				setIcon(insertButton, "text-cursor-input");
+				insertButton.setAttribute("aria-label", "插入到光标");
+				insertButton.onclick = () => {
 					this.insertAnswerAtCursor(message.content);
 				};
 
-				actions.createEl("button", { text: "复制" }).onclick = async () => {
+				const copyButton = actions.createEl("button", {
+					cls: "clickable-icon ai-chat-icon-button ai-chat-message-action",
+				});
+				setIcon(copyButton, "copy");
+				copyButton.setAttribute("aria-label", "复制");
+				copyButton.onclick = async () => {
 					await navigator.clipboard.writeText(message.content);
 					new Notice("已复制 AI 回答");
 				};
@@ -592,76 +646,37 @@ export class AiChatView extends ItemView {
 	}
 
 	renderProgress() {
-		if (!this.progressEl) return;
-
-		this.progressEl.empty();
+		if (!this.progressPercentEl) return;
 
 		const state = this.plugin.progressTracker.getState();
+		const busy = !!(state && state.active);
 
-		// 空闲（无任务或任务已结束）时完全隐藏进度条
-		if (!state || !state.active) {
-			this.progressEl.removeClass("is-active");
-			this.progressEl.style.display = "none";
-			return;
+		// AI 响应未结束前，发送图标置灰且不可用
+		if (this.sendButtonEl) {
+			this.sendButtonEl.disabled = busy;
+			this.sendButtonEl.toggleClass("is-disabled", busy);
 		}
 
-		this.progressEl.style.display = "";
+		// 空闲时不显示百分比；运行中仅在 Vault 检索图标旁显示百分比
+		if (!state || !state.active) {
+			this.progressPercentEl.setText("");
+			this.progressPercentEl.removeClass("is-active");
+			this.progressPercentEl.style.display = "none";
+			return;
+		}
 
 		const total = state.steps.length;
 		const doneCount = state.steps.filter((step) => step.status === "done").length;
 		const runningStep = state.steps.find((step) => step.status === "running");
-		const currentIndex = runningStep
-			? state.steps.indexOf(runningStep)
-			: Math.min(doneCount, Math.max(total - 1, 0));
+		const percent = total
+			? Math.round(((doneCount + (runningStep ? 0.5 : 0)) / total) * 100)
+			: 0;
+		const clamped = Math.max(0, Math.min(100, percent));
 
-		const failed = !!state.error;
-		const cancelled = !!state.cancelled;
-		const finished = !state.active && !failed && !cancelled;
-
-		let percent: number;
-		if (finished) {
-			percent = 100;
-		} else if (failed || cancelled) {
-			percent = total ? Math.round((doneCount / total) * 100) : 0;
-		} else {
-			percent = total ? Math.round(((doneCount + (runningStep ? 0.5 : 0)) / total) * 100) : 0;
-		}
-		percent = Math.max(0, Math.min(100, percent));
-
-		const statusKey = failed ? "failed" : cancelled ? "cancelled" : finished ? "done" : "running";
-		const statusText = failed ? "失败" : cancelled ? "已取消" : finished ? "完成" : "运行中";
-
-		const stageLabel = runningStep?.label ?? state.currentStep ?? (finished ? "已完成" : "");
-		const stageDetail = runningStep?.detail ?? (failed ? state.error : undefined);
-
-		this.progressEl.addClass("is-active");
-
-		const bar = this.progressEl.createDiv(`ai-progress-bar ai-progress-bar-${statusKey}`);
-
-		// 单行：图标 + 标题 + 滚动阶段 + 步骤计数 + 百分比
-		const line = bar.createDiv("ai-progress-line");
-		line.createSpan({ text: this.iconForStatus(statusKey), cls: "ai-progress-line-icon" });
-		line.createSpan({ text: state.title, cls: "ai-progress-line-title" });
-		line.createSpan({ text: statusText, cls: "ai-progress-line-status" });
-
-		const stageViewport = line.createDiv("ai-progress-stage-viewport");
-		const stageTrack = stageViewport.createDiv("ai-progress-stage-track");
-		const stageText = stageDetail ? `${stageLabel}：${stageDetail}` : stageLabel;
-		// 渲染两份，配合 CSS 实现无缝横向滚动
-		stageTrack.createSpan({ text: stageText, cls: "ai-progress-stage-item" });
-		stageTrack.createSpan({ text: stageText, cls: "ai-progress-stage-item" });
-
-		line.createSpan({
-			text: total ? `${Math.min(currentIndex + 1, total)}/${total}` : "",
-			cls: "ai-progress-line-count",
-		});
-		line.createSpan({ text: `${percent}%`, cls: "ai-progress-line-percent" });
-
-		// 进度条
-		const track = bar.createDiv("ai-progress-track");
-		const fill = track.createDiv(`ai-progress-fill ai-progress-fill-${statusKey}`);
-		fill.style.width = `${percent}%`;
-		if (statusKey === "running") fill.addClass("is-animated");
+		this.progressPercentEl.style.display = "";
+		this.progressPercentEl.addClass("is-active");
+		this.progressPercentEl.setText(`${clamped}%`);
+		this.progressPercentEl.setAttribute("aria-label", state.currentStep ?? state.title);
 	}
 
 	iconForStatus(status: string) {
@@ -671,6 +686,155 @@ export class AiChatView extends ItemView {
 		if (status === "cancelled") return "×";
 		return "○";
 	}
+}
 
-	async onClose() {}
+export class AiChatView extends ItemView {
+	plugin: AiPlugin;
+	panel: ChatPanel;
+
+	constructor(leaf: WorkspaceLeaf, plugin: AiPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+		this.panel = new ChatPanel(plugin, this, this.app);
+	}
+
+	getViewType() {
+		return AI_CHAT_VIEW_TYPE;
+	}
+
+	getDisplayText() {
+		return "AI Copilot";
+	}
+
+	getIcon() {
+		return "sparkles";
+	}
+
+	async onOpen() {
+		this.panel.mount(this.containerEl.children[1] as HTMLElement);
+	}
+
+	async onClose() {
+		this.panel.unmount();
+	}
+}
+
+export class AiChatModal extends Modal {
+	plugin: AiPlugin;
+	host: Component;
+	panel: ChatPanel;
+
+	constructor(app: App, plugin: AiPlugin) {
+		super(app);
+		this.plugin = plugin;
+		this.host = new Component();
+		this.panel = new ChatPanel(plugin, this.host, app);
+	}
+
+	onOpen() {
+		this.host.load();
+		this.modalEl.addClass("ai-chat-modal");
+		this.panel.mount(this.contentEl);
+		// 打开后自动把光标聚焦到输入框（类似快速切换）
+		window.setTimeout(() => this.panel.inputEl?.focus(), 0);
+	}
+
+	onClose() {
+		this.panel.unmount();
+		this.host.unload();
+		this.contentEl.empty();
+	}
+}
+
+export class PromptPickerModal extends Modal {
+	panel: ChatPanel;
+	selectedFile: string | null;
+
+	constructor(app: App, panel: ChatPanel) {
+		super(app);
+		this.panel = panel;
+		this.selectedFile = panel.selectedPromptFile;
+	}
+
+	onOpen() {
+		this.modalEl.addClass("ai-prompt-picker-modal");
+		this.render();
+	}
+
+	render() {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.addClass("ai-prompt-picker");
+
+		contentEl.createEl("h2", { text: "提示词" });
+
+		// 上半部分：提示词文件路径
+		const fileSection = contentEl.createDiv("ai-prompt-picker-section");
+		fileSection.createEl("div", { text: "提示词文件", cls: "ai-prompt-picker-label" });
+		const fileList = fileSection.createDiv("ai-prompt-picker-files");
+
+		const files = Array.from(new Set(this.panel.promptTemplates.map((template) => template.sourcePath))).sort((a, b) =>
+			a.localeCompare(b)
+		);
+
+		const noneFileItem = fileList.createDiv("ai-prompt-picker-file-item");
+		noneFileItem.setText("无（普通提问）");
+		if (this.selectedFile === null) noneFileItem.addClass("is-selected");
+		noneFileItem.onclick = () => {
+			this.selectedFile = null;
+			this.panel.setSelectedPrompt(null, null);
+			this.close();
+		};
+
+		for (const file of files) {
+			const fileItem = fileList.createDiv("ai-prompt-picker-file-item");
+			fileItem.setText(this.panel.getPromptFileName(file));
+			if (this.selectedFile === file) fileItem.addClass("is-selected");
+			fileItem.onclick = () => {
+				this.selectedFile = file;
+				this.render();
+			};
+		}
+
+		// 下半部分：该文件下的提示词
+		const promptSection = contentEl.createDiv("ai-prompt-picker-section");
+		promptSection.createEl("div", { text: "选择提示词", cls: "ai-prompt-picker-label" });
+		const promptList = promptSection.createDiv("ai-prompt-picker-prompts");
+
+		if (this.selectedFile === null) {
+			promptList.createEl("div", {
+				text: "请先选择上方的提示词文件以查看可用提示词。",
+				cls: "ai-prompt-picker-empty",
+			});
+			return;
+		}
+
+		const names = this.panel.promptTemplates
+			.filter((template) => template.sourcePath === this.selectedFile)
+			.map((template) => template.name);
+
+		if (names.length === 0) {
+			promptList.createEl("div", {
+				text: "该文件中没有可用的提示词。",
+				cls: "ai-prompt-picker-empty",
+			});
+			return;
+		}
+
+		for (const name of names) {
+			const promptItem = promptList.createDiv("ai-prompt-picker-prompt-item");
+			promptItem.setText(name);
+			if (this.panel.selectedPromptName === name && this.panel.selectedPromptFile === this.selectedFile) {
+				promptItem.addClass("is-selected");
+			}
+			promptItem.onclick = () => {
+				this.panel.setSelectedPrompt(this.selectedFile, name);
+				this.close();
+			};
+		}
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
 }

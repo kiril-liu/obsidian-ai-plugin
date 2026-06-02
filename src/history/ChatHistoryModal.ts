@@ -1,4 +1,4 @@
-import { App, Modal, Notice } from "obsidian";
+import { App, Modal, Notice, setIcon } from "obsidian";
 import AiPlugin from "../main";
 import { ChatConversation } from "../types";
 
@@ -50,10 +50,27 @@ export class ChatHistoryModal extends Modal {
 		});
 
 		const buttonRow = item.createDiv("ai-chat-history-actions");
-		buttonRow.createEl("button", { text: "恢复对话" }).onclick = async () => {
+
+		const restoreButton = buttonRow.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-history-restore",
+		});
+		setIcon(restoreButton, "rotate-ccw");
+		restoreButton.setAttribute("aria-label", "恢复对话");
+		restoreButton.onclick = async () => {
 			await this.plugin.restoreChatConversation(conversation.id);
 			new Notice("已恢复历史对话");
 			this.close();
+		};
+
+		const deleteButton = buttonRow.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-history-delete",
+		});
+		setIcon(deleteButton, "trash-2");
+		deleteButton.setAttribute("aria-label", "删除对话");
+		deleteButton.onclick = async () => {
+			await this.plugin.deleteChatConversation(conversation.id);
+			new Notice("已删除该历史对话");
+			this.onOpen();
 		};
 	}
 

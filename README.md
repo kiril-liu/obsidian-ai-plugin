@@ -2,9 +2,7 @@
 
 Magic Wand AI Assistant is an Obsidian plugin providing an AI assistant with features such as Chat interaction, Vault search, RAG semantic Q&A, Prompt Library, Daily Note workflow, batch prompts, conversation history, and AI response insertion into notes.
 
-Current stable version: `1.8.1`
-
-Note: Currently tested only on desktop. The vector index feature is untested; current Vault search uses keyword matching.
+The vector index feature is untested; current Vault search uses keyword matching.
 
 ## Core Features
 

@@ -17,7 +17,7 @@ import { VectorStore } from "./rag/VectorStore";
 import { VaultIndexer } from "./rag/VaultIndexer";
 import { DEFAULT_SETTINGS, AiSettingsTab } from "./settings";
 import { AiPluginSettings, ChatConversation, ChatMessage, IndexLogEntry, PluginData } from "./types";
-import { AI_CHAT_VIEW_TYPE, AiChatView } from "./views/AiChatView";
+import { AI_CHAT_VIEW_TYPE, AiChatModal, AiChatView, ChatPanel } from "./views/AiChatView";
 import { BatchPromptRunner } from "./workflows/BatchPromptRunner";
 import { PromptCommandRegistry } from "./workflows/PromptCommandRegistry";
 
@@ -44,6 +44,7 @@ export default class AiPlugin extends Plugin {
 	activeChatId: string | null = null;
 	indexLogs: IndexLogEntry[] = [];
 	lastIndexError = "";
+	chatPanels: Set<ChatPanel> = new Set();
 
 	async onload() {
 		this.loadedData = (await this.loadData()) ?? {};
@@ -70,6 +71,11 @@ export default class AiPlugin extends Plugin {
 		this.batchPromptRunner = new BatchPromptRunner(this);
 
 		this.registerView(AI_CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => new AiChatView(leaf, this));
+
+		// 左侧功能区（ribbon）图标；手机端通过底部导航条最右「三横」菜单打开。点击唤起 AI 助手
+		this.addRibbonIcon("sparkles", "AI Copilot", () => {
+			this.activateChatView();
+		});
 
 		registerNoteCommands(this);
 		registerVaultCommands(this);
@@ -158,6 +164,12 @@ export default class AiPlugin extends Plugin {
 	}
 
 	async activateChatView() {
+		// 手机端：底部弹出浮层（类似快速切换），不占满整屏、不遮挡底部按钮
+		if (Platform.isMobile) {
+			new AiChatModal(this.app, this).open();
+			return;
+		}
+
 		const leaves = this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE);
 
 		if (leaves.length > 0) {
@@ -165,29 +177,40 @@ export default class AiPlugin extends Plugin {
 			return;
 		}
 
-		// 手机端：在主区域整屏打开（配合 CSS 从底部滑入）；桌面端：右侧边栏
-		const leaf = Platform.isMobile
-			? this.app.workspace.getLeaf(true)
-			: this.app.workspace.getRightLeaf(false);
-
+		// 桌面端：右侧边栏
+		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) return;
 
 		await leaf.setViewState({ type: AI_CHAT_VIEW_TYPE, active: true });
 		this.app.workspace.revealLeaf(leaf);
 	}
 
-	refreshChatViews() {
-		for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
-			const view = leaf.view;
-			if (view instanceof AiChatView) view.renderMessages();
+	openVaultSearchSettings() {
+		const setting = (this.app as any).setting;
+
+		if (setting?.open) {
+			setting.open();
+			setting.openTabById?.(this.manifest.id);
+			return;
 		}
+
+		new Notice("请在「设置 → AI Copilot」中调整 Vault 检索选项");
+	}
+
+	registerChatPanel(panel: ChatPanel) {
+		this.chatPanels.add(panel);
+	}
+
+	unregisterChatPanel(panel: ChatPanel) {
+		this.chatPanels.delete(panel);
+	}
+
+	refreshChatViews() {
+		this.chatPanels.forEach((panel) => panel.renderMessages());
 	}
 
 	refreshProgressViews() {
-		for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
-			const view = leaf.view;
-			if (view instanceof AiChatView) view.renderProgress();
-		}
+		this.chatPanels.forEach((panel) => panel.renderProgress());
 	}
 
 	ensureActiveConversation(): ChatConversation {
@@ -248,6 +271,22 @@ export default class AiPlugin extends Plugin {
 
 		this.activeChatId = conversation.id;
 		this.chatHistory = [...conversation.messages];
+
+		await this.saveAllData();
+		this.refreshChatViews();
+	}
+
+	async deleteChatConversation(id: string) {
+		const index = this.chatConversations.findIndex((item) => item.id === id);
+		if (index === -1) return;
+
+		this.chatConversations.splice(index, 1);
+
+		// 删除的若是当前对话：清空当前会话内容，下次发送会自动新建会话
+		if (this.activeChatId === id) {
+			this.activeChatId = null;
+			this.chatHistory = [];
+		}
 
 		await this.saveAllData();
 		this.refreshChatViews();
