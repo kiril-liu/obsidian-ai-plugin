@@ -1,7 +1,8 @@
-import { FuzzySuggestModal, ItemView, MarkdownView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { FuzzySuggestModal, ItemView, MarkdownRenderer, MarkdownView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import AiPlugin from "../main";
 import { ErrorFormatter } from "../errors/ErrorFormatter";
 import { ChatHistoryModal } from "../history/ChatHistoryModal";
+import { NoteActionManager } from "../actions/NoteActionManager";
 import { SourceFormatter } from "../rag/SourceFormatter";
 import { ChatMessage, PromptTemplate } from "../types";
 
@@ -28,10 +29,13 @@ export class AiChatView extends ItemView {
 	promptSelectEl: HTMLSelectElement;
 	selectedPromptFile: string | null = null;
 	promptTemplates: PromptTemplate[] = [];
+	noteActionManager: NoteActionManager;
+	renderedMessages: ChatMessage[] = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: AiPlugin) {
 		super(leaf);
 		this.plugin = plugin;
+		this.noteActionManager = new NoteActionManager(this.app);
 	}
 
 	getViewType() {
@@ -143,11 +147,12 @@ export class AiChatView extends ItemView {
 			this.rememberCurrentMarkdownView();
 			const typed = this.inputEl.value.trim();
 
-			if (typed) {
-				this.inputEl.value = "";
-				this.plugin.addChatMessage("你", typed);
-				this.renderMessages();
-			}
+			this.inputEl.value = "";
+			const displayMessage = typed
+				? `【提示词：${selectedPrompt}】\n${typed}`
+				: `【提示词：${selectedPrompt}】`;
+			this.plugin.addChatMessage("你", displayMessage);
+			this.renderMessages();
 
 			await this.runSelectedPrompt(selectedPrompt);
 			return;
@@ -219,6 +224,7 @@ export class AiChatView extends ItemView {
 
 			const prompt = [
 				useRag ? "请结合当前笔记和参考资料回答。" : "请结合当前笔记回答用户问题。如果当前笔记上下文为空，则直接回答用户问题。",
+				this.noteActionInstruction(),
 				currentNoteContext ? this.formatCurrentNoteContext(currentNoteContext) : "",
 				contextText ? `Vault 参考资料：\n${contextText}` : "",
 				`对话历史：\n${history}`,
@@ -229,10 +235,32 @@ export class AiChatView extends ItemView {
 
 			this.plugin.progressTracker.setStep("调用 AI");
 
-			const answer = await this.plugin.aiClient.chat(prompt, signal);
-			const finalAnswer = sourcesMarkdown ? `${answer}\n\n### 参考来源\n\n${sourcesMarkdown}` : answer;
+			// 流式输出：先建一个临时气泡，token 到达时实时更新
+			const streamEl = this.messagesEl.createDiv("ai-chat-message ai-chat-message-ai is-streaming");
+			const streamBubble = streamEl.createDiv("ai-chat-bubble");
+			streamBubble.style.whiteSpace = "pre-wrap";
+			this.scrollLatestUserMessageToTop();
+
+			let answer = "";
+			await this.plugin.aiClient.chatStream(prompt, signal, (full) => {
+				answer = full;
+				const { cleaned } = NoteActionManager.parse(full);
+				streamBubble.setText(cleaned || full);
+				this.scrollLatestUserMessageToTop();
+			});
+
+			const { action, cleaned } = NoteActionManager.parse(answer);
+			const displayAnswer = cleaned || answer;
+			const finalAnswer = sourcesMarkdown ? `${displayAnswer}\n\n### 参考来源\n\n${sourcesMarkdown}` : displayAnswer;
 
 			this.plugin.addChatMessage("AI", finalAnswer);
+
+			if (action) {
+				const result = await this.noteActionManager.run(action);
+				this.plugin.addChatMessage("AI", `${result.ok ? "✅" : "⚠️"} ${result.message}`);
+				new Notice(result.message);
+			}
+
 			this.plugin.progressTracker.setStep("显示结果");
 			this.plugin.progressTracker.complete("回答完成");
 			this.renderMessages();
@@ -241,6 +269,7 @@ export class AiChatView extends ItemView {
 			const friendly = ErrorFormatter.fromUnknown(error);
 			this.plugin.progressTracker.fail(friendly.message);
 			new Notice(ErrorFormatter.toNoticeText(friendly));
+			this.renderMessages();
 		}
 	}
 
@@ -318,6 +347,18 @@ export class AiChatView extends ItemView {
 		]
 			.filter(Boolean)
 			.join("\n\n");
+	}
+
+	noteActionInstruction() {
+		return [
+			"你可以执行笔记操作。",
+			"当用户明确要求“新建笔记/页面”或“把内容写入/追加到某个笔记”时，请在正常回答之后另起一行，输出一个 note-action 代码块：",
+			"```note-action",
+			'{"action":"create","path":"目标路径或笔记名","content":"要写入的 Markdown 正文"}',
+			"```",
+			"其中 action 取 create（新建笔记）或 append（追加到已有笔记）；path 可为带文件夹的相对路径或笔记名；content 必须是完整的 Markdown 正文。",
+			"若用户只是普通提问、没有要求操作笔记，则绝对不要输出该代码块。",
+		].join("\n");
 	}
 
 	async runSlashPrompt(name: string) {
@@ -415,12 +456,37 @@ export class AiChatView extends ItemView {
 	renderMessages() {
 		if (!this.messagesEl) return;
 
-		this.messagesEl.empty();
+		// 清掉流式临时气泡和旧的底部占位，避免重复或错位
+		this.messagesEl.querySelectorAll(".is-streaming, .ai-chat-scroll-spacer").forEach((el) => el.remove());
 
-		for (const message of this.plugin.chatHistory) {
-			this.renderMessage(message);
+		const history = this.plugin.chatHistory;
+		const rendered = this.renderedMessages;
+		const domCount = this.messagesEl.querySelectorAll(".ai-chat-message").length;
+
+		// 已渲染消息是否仍是当前历史的前缀（按引用比较）
+		let commonPrefix = 0;
+		while (
+			commonPrefix < rendered.length &&
+			commonPrefix < history.length &&
+			rendered[commonPrefix] === history[commonPrefix]
+		) {
+			commonPrefix++;
 		}
 
+		if (commonPrefix === rendered.length && domCount === rendered.length) {
+			// DOM 与历史前缀一致：只追加新增的消息
+			for (let i = commonPrefix; i < history.length; i++) {
+				this.renderMessage(history[i]);
+			}
+		} else {
+			// 历史被替换 / 清空 / 截断 / 视图重建：整体重建
+			this.messagesEl.empty();
+			for (const message of history) {
+				this.renderMessage(message);
+			}
+		}
+
+		this.renderedMessages = [...history];
 		this.scrollLatestUserMessageToTop();
 	}
 
@@ -457,19 +523,26 @@ export class AiChatView extends ItemView {
 		);
 
 		const bubble = el.createDiv("ai-chat-bubble");
-		bubble.createSpan({ text: message.content });
 
 		if (message.role === "AI") {
-			const actions = el.createDiv("ai-chat-message-actions");
+			MarkdownRenderer.render(this.app, message.content, bubble, "", this);
 
-			actions.createEl("button", { text: "插入到光标" }).onclick = () => {
-				this.insertAnswerAtCursor(message.content);
-			};
+			const isStatus = message.content.startsWith("✅ ") || message.content.startsWith("⚠️ ");
 
-			actions.createEl("button", { text: "复制" }).onclick = async () => {
-				await navigator.clipboard.writeText(message.content);
-				new Notice("已复制 AI 回答");
-			};
+			if (!isStatus) {
+				const actions = el.createDiv("ai-chat-message-actions");
+
+				actions.createEl("button", { text: "插入到光标" }).onclick = () => {
+					this.insertAnswerAtCursor(message.content);
+				};
+
+				actions.createEl("button", { text: "复制" }).onclick = async () => {
+					await navigator.clipboard.writeText(message.content);
+					new Notice("已复制 AI 回答");
+				};
+			}
+		} else {
+			bubble.createSpan({ text: message.content });
 		}
 	}
 
@@ -525,22 +598,70 @@ export class AiChatView extends ItemView {
 
 		const state = this.plugin.progressTracker.getState();
 
-		if (!state) {
-			this.progressEl.createEl("div", { text: "暂无 AI 调用", cls: "ai-chat-progress-empty" });
+		// 空闲（无任务或任务已结束）时完全隐藏进度条
+		if (!state || !state.active) {
+			this.progressEl.removeClass("is-active");
+			this.progressEl.style.display = "none";
 			return;
 		}
 
-		const header = this.progressEl.createDiv("ai-progress-header");
-		header.createEl("strong", { text: state.title });
-		header.createEl("span", { text: state.active ? "运行中" : state.cancelled ? "已取消" : state.error ? "失败" : "完成" });
+		this.progressEl.style.display = "";
 
-		const list = this.progressEl.createDiv("ai-progress-step-list");
+		const total = state.steps.length;
+		const doneCount = state.steps.filter((step) => step.status === "done").length;
+		const runningStep = state.steps.find((step) => step.status === "running");
+		const currentIndex = runningStep
+			? state.steps.indexOf(runningStep)
+			: Math.min(doneCount, Math.max(total - 1, 0));
 
-		for (const step of state.steps) {
-			const row = list.createDiv(`ai-progress-step ai-progress-step-${step.status}`);
-			row.createSpan({ text: this.iconForStatus(step.status), cls: "ai-progress-step-icon" });
-			row.createSpan({ text: step.detail ? `${step.label}：${step.detail}` : step.label });
+		const failed = !!state.error;
+		const cancelled = !!state.cancelled;
+		const finished = !state.active && !failed && !cancelled;
+
+		let percent: number;
+		if (finished) {
+			percent = 100;
+		} else if (failed || cancelled) {
+			percent = total ? Math.round((doneCount / total) * 100) : 0;
+		} else {
+			percent = total ? Math.round(((doneCount + (runningStep ? 0.5 : 0)) / total) * 100) : 0;
 		}
+		percent = Math.max(0, Math.min(100, percent));
+
+		const statusKey = failed ? "failed" : cancelled ? "cancelled" : finished ? "done" : "running";
+		const statusText = failed ? "失败" : cancelled ? "已取消" : finished ? "完成" : "运行中";
+
+		const stageLabel = runningStep?.label ?? state.currentStep ?? (finished ? "已完成" : "");
+		const stageDetail = runningStep?.detail ?? (failed ? state.error : undefined);
+
+		this.progressEl.addClass("is-active");
+
+		const bar = this.progressEl.createDiv(`ai-progress-bar ai-progress-bar-${statusKey}`);
+
+		// 单行：图标 + 标题 + 滚动阶段 + 步骤计数 + 百分比
+		const line = bar.createDiv("ai-progress-line");
+		line.createSpan({ text: this.iconForStatus(statusKey), cls: "ai-progress-line-icon" });
+		line.createSpan({ text: state.title, cls: "ai-progress-line-title" });
+		line.createSpan({ text: statusText, cls: "ai-progress-line-status" });
+
+		const stageViewport = line.createDiv("ai-progress-stage-viewport");
+		const stageTrack = stageViewport.createDiv("ai-progress-stage-track");
+		const stageText = stageDetail ? `${stageLabel}：${stageDetail}` : stageLabel;
+		// 渲染两份，配合 CSS 实现无缝横向滚动
+		stageTrack.createSpan({ text: stageText, cls: "ai-progress-stage-item" });
+		stageTrack.createSpan({ text: stageText, cls: "ai-progress-stage-item" });
+
+		line.createSpan({
+			text: total ? `${Math.min(currentIndex + 1, total)}/${total}` : "",
+			cls: "ai-progress-line-count",
+		});
+		line.createSpan({ text: `${percent}%`, cls: "ai-progress-line-percent" });
+
+		// 进度条
+		const track = bar.createDiv("ai-progress-track");
+		const fill = track.createDiv(`ai-progress-fill ai-progress-fill-${statusKey}`);
+		fill.style.width = `${percent}%`;
+		if (statusKey === "running") fill.addClass("is-animated");
 	}
 
 	iconForStatus(status: string) {

@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Platform, Plugin, WorkspaceLeaf } from "obsidian";
 import { AiClient } from "./ai/AiClient";
 import { EmbeddingClient } from "./ai/EmbeddingClient";
 import { registerDailyCommands } from "./commands/dailyCommands";
@@ -16,277 +16,244 @@ import { KeywordSearch } from "./rag/KeywordSearch";
 import { VectorStore } from "./rag/VectorStore";
 import { VaultIndexer } from "./rag/VaultIndexer";
 import { DEFAULT_SETTINGS, AiSettingsTab } from "./settings";
-import {
-  AiPluginSettings,
-  ChatConversation,
-  ChatMessage,
-  IndexLogEntry,
-  PluginData,
-} from "./types";
+import { AiPluginSettings, ChatConversation, ChatMessage, IndexLogEntry, PluginData } from "./types";
 import { AI_CHAT_VIEW_TYPE, AiChatView } from "./views/AiChatView";
 import { BatchPromptRunner } from "./workflows/BatchPromptRunner";
 import { PromptCommandRegistry } from "./workflows/PromptCommandRegistry";
 
 export default class AiPlugin extends Plugin {
-  settings: AiPluginSettings;
-  loadedData: PluginData | null = null;
+	settings: AiPluginSettings;
+	loadedData: PluginData = {};
 
-  aiClient: AiClient;
-  embeddingClient: EmbeddingClient;
-  keywordSearch: KeywordSearch;
-  vectorStore: VectorStore;
-  vaultIndexer: VaultIndexer;
-  indexStorage: IndexStorage;
-  hybridSearch: HybridSearch;
-  promptManager: PromptManager;
-  progressTracker: ProgressTracker;
-  dailyNoteManager: DailyNoteManager;
-  promptRunHistory: PromptRunHistory;
-  promptCommandRegistry: PromptCommandRegistry;
-  batchPromptRunner: BatchPromptRunner;
+	aiClient: AiClient;
+	embeddingClient: EmbeddingClient;
+	keywordSearch: KeywordSearch;
+	vectorStore: VectorStore;
+	vaultIndexer: VaultIndexer;
+	indexStorage: IndexStorage;
+	hybridSearch: HybridSearch;
+	promptManager: PromptManager;
+	progressTracker: ProgressTracker;
+	dailyNoteManager: DailyNoteManager;
+	promptRunHistory: PromptRunHistory;
+	promptCommandRegistry: PromptCommandRegistry;
+	batchPromptRunner: BatchPromptRunner;
 
-  chatHistory: ChatMessage[] = [];
-  chatConversations: ChatConversation[] = [];
-  activeChatId = "";
-  indexLogs: IndexLogEntry[] = [];
-  lastIndexError = "";
+	chatHistory: ChatMessage[] = [];
+	chatConversations: ChatConversation[] = [];
+	activeChatId: string | null = null;
+	indexLogs: IndexLogEntry[] = [];
+	lastIndexError = "";
 
-  async onload() {
-    const data = ((await this.loadData()) ?? {}) as PluginData;
-    this.loadedData = data;
+	async onload() {
+		this.loadedData = (await this.loadData()) ?? {};
+		this.settings = { ...DEFAULT_SETTINGS, ...(this.loadedData.settings ?? {}) };
+		this.chatHistory = this.loadedData.chatHistory ?? [];
+		this.chatConversations = this.loadedData.chatConversations ?? [];
+		this.activeChatId = this.loadedData.activeChatId ?? null;
+		this.indexLogs = this.loadedData.indexLogs ?? [];
+		this.lastIndexError = this.loadedData.lastIndexError ?? "";
 
-    this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
-    this.chatHistory = data.chatHistory ?? [];
-    this.chatConversations = data.chatConversations ?? [];
-    this.activeChatId = data.activeChatId ?? "";
-    this.indexLogs = data.indexLogs ?? [];
-    this.lastIndexError = data.lastIndexError ?? "";
+		this.aiClient = new AiClient(this);
+		this.embeddingClient = new EmbeddingClient(this);
+		this.keywordSearch = new KeywordSearch(this);
+		this.vectorStore = new VectorStore();
+		this.indexStorage = new IndexStorage(this);
+		this.hybridSearch = new HybridSearch(this);
+		this.vaultIndexer = new VaultIndexer(this);
+		this.promptManager = new PromptManager(this);
+		this.progressTracker = new ProgressTracker(this);
+		this.dailyNoteManager = new DailyNoteManager(this);
+		this.promptRunHistory = new PromptRunHistory(this);
+		this.promptRunHistory.load(this.loadedData.promptRunHistory ?? []);
+		this.promptCommandRegistry = new PromptCommandRegistry(this);
+		this.batchPromptRunner = new BatchPromptRunner(this);
 
-    this.aiClient = new AiClient(this);
-    this.embeddingClient = new EmbeddingClient(this);
-    this.keywordSearch = new KeywordSearch(this);
-    this.vectorStore = new VectorStore();
-    this.indexStorage = new IndexStorage(this);
-    this.hybridSearch = new HybridSearch(this);
-    this.vaultIndexer = new VaultIndexer(this);
-    this.promptManager = new PromptManager(this);
-    this.progressTracker = new ProgressTracker(this);
-    this.dailyNoteManager = new DailyNoteManager(this);
-    this.promptRunHistory = new PromptRunHistory(this);
-    this.promptRunHistory.load(data.promptRunHistory ?? []);
-    this.promptCommandRegistry = new PromptCommandRegistry(this);
-    this.batchPromptRunner = new BatchPromptRunner(this);
+		this.registerView(AI_CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => new AiChatView(leaf, this));
 
-    this.ensureActiveConversation();
+		registerNoteCommands(this);
+		registerVaultCommands(this);
+		registerPromptCommands(this);
+		registerDailyCommands(this);
+		registerWorkflowCommands(this);
 
-    this.registerView(
-      AI_CHAT_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new AiChatView(leaf, this),
-    );
-	
-	this.addRibbonIcon("wand-sparkles", "Open AI Copilot", async () => {
-	await this.activateChatView();
-	});
-	
-    registerNoteCommands(this);
-    registerVaultCommands(this);
-    registerPromptCommands(this);
-    registerDailyCommands(this);
-    registerWorkflowCommands(this);
+		this.addSettingTab(new AiSettingsTab(this.app, this));
 
-    this.addSettingTab(new AiSettingsTab(this.app, this));
+		await this.vaultIndexer.loadIndexOnStartup();
 
-    await this.vaultIndexer.loadIndexOnStartup();
+		if (this.settings.enablePromptCommandRegistration) {
+			await this.promptCommandRegistry.registerPromptTemplateCommands();
+		}
 
-    if (this.settings.enablePromptCommandRegistration) {
-      await this.promptCommandRegistry.registerPromptTemplateCommands();
-    }
+		if (this.settings.autoUpdateIndexOnStartup) {
+			setTimeout(() => this.vaultIndexer.updateVectorIndex(), 2000);
+		}
 
-    if (this.settings.autoUpdateIndexOnStartup) {
-      setTimeout(() => this.vaultIndexer.updateVectorIndex(), 2000);
-    }
+		new Notice("AI Copilot 已加载");
+	}
 
-    new Notice("AI Copilot 已加载");
-  }
+	onunload() {
+		this.app.workspace.detachLeavesOfType(AI_CHAT_VIEW_TYPE);
+	}
 
-  onunload() {
-    this.app.workspace.detachLeavesOfType(AI_CHAT_VIEW_TYPE);
-  }
+	async saveSettings() {
+		await this.saveAllData();
+	}
 
-  async saveSettings() {
-    await this.saveAllData();
-  }
+	async saveAllData() {
+		await this.saveData({
+			settings: this.settings,
+			vectorIndex: this.settings.enableExternalIndexStorage ? null : this.vectorStore.getIndex(),
+			chatHistory: this.chatHistory,
+			chatConversations: this.chatConversations,
+			activeChatId: this.activeChatId ?? undefined,
+			indexLogs: this.indexLogs,
+			lastIndexError: this.lastIndexError,
+			promptRunHistory: this.promptRunHistory.entries,
+		});
+	}
 
-  async saveAllData() {
-    await this.saveData({
-      settings: this.settings,
-      vectorIndex: this.settings.enableExternalIndexStorage
-        ? null
-        : this.vectorStore.getIndex(),
-      chatHistory: this.chatHistory,
-      chatConversations: this.chatConversations,
-      activeChatId: this.activeChatId,
-      indexLogs: this.indexLogs,
-      lastIndexError: this.lastIndexError,
-      promptRunHistory: this.promptRunHistory.entries,
-    });
-  }
+	addChatMessage(role: "你" | "AI", content: string) {
+		this.chatHistory.push({
+			role,
+			content,
+			createdAt: new Date().toISOString(),
+		});
 
-  ensureActiveConversation() {
-    if (
-      this.activeChatId &&
-      this.chatConversations.some((item) => item.id === this.activeChatId)
-    ) {
-      return;
-    }
+		if (this.chatHistory.length > this.settings.chatHistoryMaxMessages) {
+			this.chatHistory = this.chatHistory.slice(this.chatHistory.length - this.settings.chatHistoryMaxMessages);
+		}
 
-    const now = new Date().toISOString();
-    const conversation: ChatConversation = {
-      id: crypto.randomUUID(),
-      title: "新对话",
-      messages: this.chatHistory ?? [],
-      createdAt: now,
-      updatedAt: now,
-    };
+		this.syncActiveConversation();
+		this.saveAllData();
+		this.refreshChatViews();
+	}
 
-    this.activeChatId = conversation.id;
-    this.chatConversations.unshift(conversation);
-  }
+	addIndexLog(level: "info" | "warn" | "error", message: string) {
+		this.indexLogs.push({
+			level,
+			message,
+			createdAt: new Date().toISOString(),
+		});
 
-  syncActiveConversation() {
-    this.ensureActiveConversation();
+		if (this.indexLogs.length > this.settings.indexLogMaxEntries) {
+			this.indexLogs = this.indexLogs.slice(this.indexLogs.length - this.settings.indexLogMaxEntries);
+		}
 
-    const conversation = this.chatConversations.find(
-      (item) => item.id === this.activeChatId,
-    );
-    if (!conversation) return;
+		this.saveAllData();
+	}
 
-    conversation.messages = this.chatHistory;
-    conversation.updatedAt = new Date().toISOString();
-    conversation.title = this.buildConversationTitle(this.chatHistory);
-  }
+	shouldExcludePath(path: string) {
+		const excluded = this.settings.excludedFolders
+			.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
 
-  buildConversationTitle(messages: ChatMessage[]) {
-    const firstUserMessage = messages.find((message) => message.role === "你");
-    if (!firstUserMessage) return "新对话";
-    return firstUserMessage.content.slice(0, 24) || "新对话";
-  }
+		return excluded.some((folder) => path.startsWith(folder + "/") || path === folder);
+	}
 
-  async startNewChatConversation() {
-    this.syncActiveConversation();
+	limitText(text: string, max = 12000) {
+		if (text.length <= max) return text;
+		return text.slice(0, max) + "\n\n……内容过长，已截断。";
+	}
 
-    const now = new Date().toISOString();
-    const conversation: ChatConversation = {
-      id: crypto.randomUUID(),
-      title: "新对话",
-      messages: [],
-      createdAt: now,
-      updatedAt: now,
-    };
+	async activateChatView() {
+		const leaves = this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE);
 
-    this.chatConversations.unshift(conversation);
-    this.activeChatId = conversation.id;
-    this.chatHistory = [];
+		if (leaves.length > 0) {
+			this.app.workspace.revealLeaf(leaves[0]);
+			return;
+		}
 
-    await this.saveAllData();
-    this.refreshChatViews();
-  }
+		// 手机端：在主区域整屏打开（配合 CSS 从底部滑入）；桌面端：右侧边栏
+		const leaf = Platform.isMobile
+			? this.app.workspace.getLeaf(true)
+			: this.app.workspace.getRightLeaf(false);
 
-  async restoreChatConversation(conversationId: string) {
-    this.syncActiveConversation();
+		if (!leaf) return;
 
-    const conversation = this.chatConversations.find(
-      (item) => item.id === conversationId,
-    );
-    if (!conversation) return;
+		await leaf.setViewState({ type: AI_CHAT_VIEW_TYPE, active: true });
+		this.app.workspace.revealLeaf(leaf);
+	}
 
-    this.activeChatId = conversation.id;
-    this.chatHistory = [...conversation.messages];
+	refreshChatViews() {
+		for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
+			const view = leaf.view;
+			if (view instanceof AiChatView) view.renderMessages();
+		}
+	}
 
-    await this.saveAllData();
-    this.refreshChatViews();
-  }
+	refreshProgressViews() {
+		for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
+			const view = leaf.view;
+			if (view instanceof AiChatView) view.renderProgress();
+		}
+	}
 
-  addChatMessage(role: "你" | "AI", content: string) {
-    this.chatHistory.push({
-      role,
-      content,
-      createdAt: new Date().toISOString(),
-    });
+	ensureActiveConversation(): ChatConversation {
+		let conversation = this.chatConversations.find((item) => item.id === this.activeChatId);
 
-    if (this.chatHistory.length > this.settings.chatHistoryMaxMessages) {
-      this.chatHistory = this.chatHistory.slice(
-        this.chatHistory.length - this.settings.chatHistoryMaxMessages,
-      );
-    }
+		if (!conversation) {
+			const now = new Date().toISOString();
+			conversation = {
+				id: this.createConversationId(),
+				title: "",
+				messages: [],
+				createdAt: now,
+				updatedAt: now,
+			};
+			this.chatConversations.push(conversation);
+			this.activeChatId = conversation.id;
+		}
 
-    this.syncActiveConversation();
-    this.saveAllData();
-    this.refreshChatViews();
-  }
+		return conversation;
+	}
 
-  addIndexLog(level: "info" | "warn" | "error", message: string) {
-    this.indexLogs.push({
-      level,
-      message,
-      createdAt: new Date().toISOString(),
-    });
+	syncActiveConversation() {
+		const conversation = this.ensureActiveConversation();
+		conversation.messages = [...this.chatHistory];
+		conversation.updatedAt = new Date().toISOString();
 
-    if (this.indexLogs.length > this.settings.indexLogMaxEntries) {
-      this.indexLogs = this.indexLogs.slice(
-        this.indexLogs.length - this.settings.indexLogMaxEntries,
-      );
-    }
+		if (!conversation.title) {
+			const firstUser = this.chatHistory.find((message) => message.role === "你");
+			if (firstUser) conversation.title = firstUser.content.split("\\n")[0].slice(0, 50);
+		}
+	}
 
-    this.saveAllData();
-  }
+	async startNewChatConversation() {
+		this.syncActiveConversation();
 
-  shouldExcludePath(path: string) {
-    const excluded = this.settings.excludedFolders
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+		const now = new Date().toISOString();
+		const conversation: ChatConversation = {
+			id: this.createConversationId(),
+			title: "",
+			messages: [],
+			createdAt: now,
+			updatedAt: now,
+		};
 
-    return excluded.some(
-      (folder) => path.startsWith(folder + "/") || path === folder,
-    );
-  }
+		this.chatConversations.push(conversation);
+		this.activeChatId = conversation.id;
+		this.chatHistory = [];
 
-  limitText(text: string, max = 12000) {
-    if (text.length <= max) return text;
-    return text.slice(0, max) + "\n\n……内容过长，已截断。";
-  }
+		await this.saveAllData();
+		this.refreshChatViews();
+	}
 
-  async activateChatView() {
-    const leaves = this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE);
+	async restoreChatConversation(id: string) {
+		this.syncActiveConversation();
 
-    if (leaves.length > 0) {
-      this.app.workspace.revealLeaf(leaves[0]);
-      return;
-    }
+		const conversation = this.chatConversations.find((item) => item.id === id);
+		if (!conversation) return;
 
-    const leaf = this.app.workspace.getRightLeaf(false);
+		this.activeChatId = conversation.id;
+		this.chatHistory = [...conversation.messages];
 
-    if (!leaf) {
-      new Notice("无法打开 AI Chat 面板");
-      return;
-    }
+		await this.saveAllData();
+		this.refreshChatViews();
+	}
 
-    await leaf.setViewState({ type: AI_CHAT_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
-  }
-
-  refreshChatViews() {
-    for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
-      const view = leaf.view;
-      if (view instanceof AiChatView) view.renderMessages();
-    }
-  }
-
-  refreshProgressViews() {
-    for (const leaf of this.app.workspace.getLeavesOfType(AI_CHAT_VIEW_TYPE)) {
-      const view = leaf.view;
-      if (view instanceof AiChatView) view.renderProgress();
-    }
-  }
+	createConversationId() {
+		return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	}
 }

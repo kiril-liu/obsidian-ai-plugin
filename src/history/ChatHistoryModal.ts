@@ -34,19 +34,20 @@ export class ChatHistoryModal extends Modal {
 	renderConversation(container: HTMLElement, conversation: ChatConversation) {
 		const item = container.createDiv("ai-chat-history-item");
 
+		const firstUserMessage = conversation.messages.find(
+			(message) => message.role === "你",
+		);
+		const preview =
+			(firstUserMessage?.content ?? "").split("\n")[0] ||
+			conversation.title ||
+			"未命名对话";
+
 		const titleRow = item.createDiv("ai-chat-history-title-row");
-		titleRow.createEl("strong", { text: conversation.title || "未命名对话" });
+		titleRow.createEl("strong", { text: preview });
 		titleRow.createEl("span", {
 			text: new Date(conversation.updatedAt).toLocaleString(),
 			cls: "ai-chat-history-time",
 		});
-
-		const firstUserMessage = conversation.messages.find(
-			(message) => message.role === "你",
-		);
-		const preview = (firstUserMessage?.content ?? "").split("\n")[0];
-
-		item.createEl("div", { text: preview, cls: "ai-chat-history-preview" });
 
 		const buttonRow = item.createDiv("ai-chat-history-actions");
 		buttonRow.createEl("button", { text: "恢复对话" }).onclick = async () => {
