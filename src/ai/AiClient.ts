@@ -16,6 +16,11 @@ export class AiClient {
 		}
 
 		try {
+			const messages = [
+				{ role: "system", content: "你是一个帮助用户整理 Obsidian 笔记的中文 AI 助手。" },
+				{ role: "user", content: prompt },
+			];
+
 			const response = await fetch(`${this.plugin.settings.baseUrl}/chat/completions`, {
 				method: "POST",
 				headers: {
@@ -25,10 +30,7 @@ export class AiClient {
 				signal,
 				body: JSON.stringify({
 					model: this.plugin.settings.model,
-					messages: [
-						{ role: "system", content: "你是一个帮助用户整理 Obsidian 笔记的中文 AI 助手。" },
-						{ role: "user", content: prompt },
-					],
+					messages,
 					temperature: 0.7,
 				}),
 			});
@@ -55,6 +57,11 @@ export class AiClient {
 		}
 
 		try {
+			const messages = [
+				{ role: "system", content: "你是一个帮助用户整理 Obsidian 笔记的中文 AI 助手。" },
+				{ role: "user", content: prompt },
+			];
+
 			const response = await fetch(`${this.plugin.settings.baseUrl}/chat/completions`, {
 				method: "POST",
 				headers: {
@@ -64,10 +71,7 @@ export class AiClient {
 				signal,
 				body: JSON.stringify({
 					model: this.plugin.settings.model,
-					messages: [
-						{ role: "system", content: "你是一个帮助用户整理 Obsidian 笔记的中文 AI 助手。" },
-						{ role: "user", content: prompt },
-					],
+					messages,
 					temperature: 0.7,
 					stream: true,
 				}),

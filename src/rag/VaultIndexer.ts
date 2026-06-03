@@ -1,6 +1,7 @@
 import { Notice, TFile } from "obsidian";
 import AiPlugin from "../main";
 import { Chunker } from "./Chunker";
+import { ErrorFormatter } from "../errors/ErrorFormatter";
 import { VaultVectorIndex, VectorChunk, VectorChunkInput } from "../types";
 
 // 每批送入 Embedding 接口的最大片段数，避免单次请求过大或超时
@@ -113,7 +114,8 @@ export class VaultIndexer {
 
 			this.plugin.progressTracker.complete(`索引完成：${chunks.length} 个片段`);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			console.error("[AI Copilot] 构建索引失败：", error);
+			const message = ErrorFormatter.toNoticeText(ErrorFormatter.fromUnknown(error));
 			this.plugin.lastIndexError = message;
 			this.plugin.progressTracker.fail(message);
 			new Notice(`索引失败：${message}`);
@@ -171,7 +173,7 @@ export class VaultIndexer {
 				`增量更新完成：新增/更新 ${changedFiles.length} 个文件，删除 ${deletedCount} 个，复用 ${reusedChunks.length} 个片段`
 			);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = ErrorFormatter.toNoticeText(ErrorFormatter.fromUnknown(error));
 			this.plugin.lastIndexError = message;
 			this.plugin.progressTracker.fail(message);
 			new Notice(`增量索引失败：${message}`);

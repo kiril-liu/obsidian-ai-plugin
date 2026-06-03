@@ -15,6 +15,7 @@ import { HybridSearch } from "./rag/HybridSearch";
 import { KeywordSearch } from "./rag/KeywordSearch";
 import { VectorStore } from "./rag/VectorStore";
 import { VaultIndexer } from "./rag/VaultIndexer";
+import { ChatMemoryStore } from "./memory/ChatMemoryStore";
 import { DEFAULT_SETTINGS, AiSettingsTab } from "./settings";
 import { AiPluginSettings, ChatConversation, ChatMessage, IndexLogEntry, PluginData } from "./types";
 import { AI_CHAT_VIEW_TYPE, AiChatModal, AiChatView, ChatPanel } from "./views/AiChatView";
@@ -29,6 +30,7 @@ export default class AiPlugin extends Plugin {
 	embeddingClient: EmbeddingClient;
 	keywordSearch: KeywordSearch;
 	vectorStore: VectorStore;
+	chatMemory: ChatMemoryStore;
 	vaultIndexer: VaultIndexer;
 	indexStorage: IndexStorage;
 	hybridSearch: HybridSearch;
@@ -59,6 +61,7 @@ export default class AiPlugin extends Plugin {
 		this.embeddingClient = new EmbeddingClient(this);
 		this.keywordSearch = new KeywordSearch(this);
 		this.vectorStore = new VectorStore();
+		this.chatMemory = new ChatMemoryStore(this);
 		this.indexStorage = new IndexStorage(this);
 		this.hybridSearch = new HybridSearch(this);
 		this.vaultIndexer = new VaultIndexer(this);
@@ -119,19 +122,24 @@ export default class AiPlugin extends Plugin {
 		});
 	}
 
-	addChatMessage(role: "你" | "AI", content: string) {
-		this.chatHistory.push({
+	async addChatMessage(role: "你" | "AI", content: string) {
+		const message: ChatMessage = {
 			role,
 			content,
 			createdAt: new Date().toISOString(),
-		});
+		};
+		this.chatHistory.push(message);
 
 		if (this.chatHistory.length > this.settings.chatHistoryMaxMessages) {
 			this.chatHistory = this.chatHistory.slice(this.chatHistory.length - this.settings.chatHistoryMaxMessages);
 		}
 
 		this.syncActiveConversation();
-		this.saveAllData();
+
+		// 会话记忆：把这条消息追加进当前会话的独立向量库（不随上面 chatHistory 截断而丢失）
+		await this.chatMemory.remember(this.ensureActiveConversation(), message);
+
+		await this.saveAllData();
 		this.refreshChatViews();
 	}
 

@@ -1,7 +1,6 @@
-import { normalizePath, TFile } from "obsidian";
+import { normalizePath } from "obsidian";
 import AiPlugin from "../main";
 import { VaultVectorIndex, VectorIndexMeta } from "../types";
-import { ensureFolder, upsertFile } from "../utils/FileUtils";
 
 export class IndexStorage {
 	plugin: AiPlugin;
@@ -18,8 +17,22 @@ export class IndexStorage {
 		return normalizePath(`${this.plugin.settings.indexStorageFolder}/index-meta.json`);
 	}
 
+	// 用 adapter 逐级创建文件夹：兼容 .obsidian 配置目录，且文件夹已存在时不再抛 "Folder already exists"
+	private async ensureFolder(folder: string) {
+		const adapter = this.plugin.app.vault.adapter;
+		const segments = normalizePath(folder).split("/").filter(Boolean);
+
+		let current = "";
+		for (const segment of segments) {
+			current = current ? `${current}/${segment}` : segment;
+			if (!(await adapter.exists(current))) {
+				await adapter.mkdir(current);
+			}
+		}
+	}
+
 	async save(index: VaultVectorIndex) {
-		await ensureFolder(this.plugin.app, this.plugin.settings.indexStorageFolder);
+		await this.ensureFolder(this.plugin.settings.indexStorageFolder);
 
 		const meta: VectorIndexMeta = {
 			version: index.version,
@@ -39,24 +52,25 @@ export class IndexStorage {
 	}
 
 	async load(): Promise<VaultVectorIndex | null> {
-		const file = this.plugin.app.vault.getAbstractFileByPath(this.getIndexPath());
+		const adapter = this.plugin.app.vault.adapter;
+		const path = this.getIndexPath();
 
-		if (!(file instanceof TFile)) return null;
+		if (!(await adapter.exists(path))) return null;
 
-		return JSON.parse(await this.plugin.app.vault.cachedRead(file)) as VaultVectorIndex;
+		return JSON.parse(await adapter.read(path)) as VaultVectorIndex;
 	}
 
 	async clear() {
-		for (const path of [this.getIndexPath(), this.getMetaPath()]) {
-			const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		const adapter = this.plugin.app.vault.adapter;
 
-			if (file instanceof TFile) {
-				await this.plugin.app.vault.delete(file);
+		for (const path of [this.getIndexPath(), this.getMetaPath()]) {
+			if (await adapter.exists(path)) {
+				await adapter.remove(path);
 			}
 		}
 	}
 
 	async writeJson(path: string, value: unknown) {
-		await upsertFile(this.plugin.app, path, JSON.stringify(value, null, 2));
+		await this.plugin.app.vault.adapter.write(path, JSON.stringify(value, null, 2));
 	}
 }

@@ -1,16 +1,7 @@
 export type PromptMode = "basic" | "keyword" | "rag";
 export type PromptOutputMode = "chat" | "append" | "replace_selection";
-export type OutputAction =
-  | "insert_at_cursor"
-  | "append_to_note"
-  | "replace_selection"
-  | "copy_to_clipboard"
-  | "cancel";
-export type PromptWorkflowOutputTarget =
-  | "chat"
-  | "current_note"
-  | "new_note"
-  | "clipboard";
+export type OutputAction = "insert_at_cursor" | "append_to_note" | "replace_selection" | "copy_to_clipboard" | "cancel";
+export type PromptWorkflowOutputTarget = "chat" | "current_note" | "new_note" | "clipboard";
 
 export interface AiPluginSettings {
   apiKey: string;
@@ -20,10 +11,15 @@ export interface AiPluginSettings {
   vaultSearchMaxCharsPerResult: number;
   embeddingBaseUrl: string;
   embeddingModel: string;
+  embeddingProvider: "api" | "local";
+  localEmbeddingModel: string;
+  localModelPath: string;
   vectorSearchMaxResults: number;
   chunkMaxChars: number;
   chunkOverlapChars: number;
   excludedFolders: string;
+  includedTextExtensions: string;
+  maxTextFileSizeKb: number;
   chatHistoryMaxMessages: number;
   indexLogMaxEntries: number;
   enablePromptLibrary: boolean;
@@ -46,8 +42,6 @@ export interface AiPluginSettings {
   promptRunHistoryMaxEntries: number;
   workflowOutputFolder: string;
   batchRunMaxFiles: number;
-  includedTextExtensions: string;
-  maxTextFileSizeKb: number;
 }
 
 export interface VaultSearchResult {
@@ -128,12 +122,21 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export interface ChatMemoryEntry {
+  seq: number;
+  role: "你" | "AI";
+  text: string;
+  embedding: number[];
+  modelId: string;
+}
+
 export interface ChatConversation {
   id: string;
   title: string;
   messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;
+  memory?: ChatMemoryEntry[];
 }
 
 export interface IndexLogEntry {

@@ -25,6 +25,7 @@ export class ChatPanel {
 	sourcesEl: HTMLElement;
 	statusEl: HTMLElement;
 	useRag = false;
+	useCurrentNote = true;
 	vaultSearchButtonEl: HTMLButtonElement;
 	progressPercentEl: HTMLElement;
 	sendButtonEl: HTMLButtonElement;
@@ -36,6 +37,7 @@ export class ChatPanel {
 	promptTemplates: PromptTemplate[] = [];
 	noteActionManager: NoteActionManager;
 	renderedMessages: ChatMessage[] = [];
+	keyboardViewportHandler: (() => void) | null = null;
 
 	constructor(plugin: AiPlugin, host: Component, app: App) {
 		this.plugin = plugin;
@@ -144,7 +146,29 @@ export class ChatPanel {
 	}
 
 	unmount() {
+		const viewport = window.visualViewport;
+		if (viewport && this.keyboardViewportHandler) {
+			viewport.removeEventListener("resize", this.keyboardViewportHandler);
+			viewport.removeEventListener("scroll", this.keyboardViewportHandler);
+			this.keyboardViewportHandler = null;
+		}
 		this.plugin.unregisterChatPanel(this);
+	}
+
+	// 手机端：让输入栏浮动并随键盘高度上移（依赖 visualViewport）
+	enableKeyboardFloating() {
+		const viewport = window.visualViewport;
+		if (!viewport || !this.containerEl) return;
+
+		const update = () => {
+			const keyboardHeight = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+			this.containerEl.style.setProperty("--ai-chat-keyboard-height", `${keyboardHeight}px`);
+		};
+
+		this.keyboardViewportHandler = update;
+		viewport.addEventListener("resize", update);
+		viewport.addEventListener("scroll", update);
+		update();
 	}
 
 	async send(useRag = false) {
@@ -175,7 +199,7 @@ export class ChatPanel {
 
 		this.rememberCurrentMarkdownView();
 		this.inputEl.value = "";
-		this.plugin.addChatMessage("你", question);
+		await this.plugin.addChatMessage("你", question);
 		this.renderMessages();
 
 		this.activePromptName = useRag ? "普通提问 + Vault 检索" : "普通提问";
@@ -193,10 +217,39 @@ export class ChatPanel {
 			const signal = this.plugin.progressTracker.start("AI Chat", ["准备上下文", "检索 Vault", "调用 AI", "显示结果"]);
 			this.plugin.progressTracker.setStep("准备上下文");
 
-			const currentNoteContext = await this.getCurrentNoteContext();
+			const currentNoteContext = this.useCurrentNote ? await this.getCurrentNoteContext() : null;
 			let contextText = "";
 			let sourcesMarkdown = "";
 			let sources: any[] = [];
+
+			// 当前问题只 embed 一次，会话记忆检索与 Vault 检索共用
+			let questionEmbedding: number[] | null = null;
+			try {
+				questionEmbedding = (await this.plugin.embeddingClient.embed([question], signal))[0] ?? null;
+			} catch (error) {
+				questionEmbedding = null;
+			}
+
+			// 最近 N 条窗口：保证局部连贯性与指代消解（chatHistory 已截断到 N，末尾是刚加入的当前问题，单独展示故去掉）
+			const recentMessages = this.plugin.chatHistory.slice(0, -1);
+			const recentTexts = new Set(recentMessages.map((message) => message.content));
+			const recentText = recentMessages.map((message) => `${message.role}：${message.content}`).join("\n\n");
+
+			// 会话记忆：在当前会话独立向量库里检索相关历史（与 Vault 索引隔离，不跨会话）
+			// 去重：已经在“最近 N 条窗口”里的消息不再重复进入语义记忆
+			let memoryText = "";
+			if (questionEmbedding) {
+				const conversation = this.plugin.ensureActiveConversation();
+				const memoryHits = this.plugin.chatMemory
+					.search(
+						conversation,
+						questionEmbedding,
+						this.plugin.settings.chatHistoryMaxMessages,
+						question
+					)
+					.filter((hit) => !recentTexts.has(hit.text));
+				memoryText = this.plugin.chatMemory.formatForPrompt(memoryHits);
+			}
 
 			if (useRag) {
 				this.plugin.progressTracker.setStep("检索 Vault");
@@ -205,7 +258,7 @@ export class ChatPanel {
 					const index = this.plugin.vectorStore.getIndex();
 
 					if (index && index.chunks.length > 0) {
-						const queryEmbedding = (await this.plugin.embeddingClient.embed([question], signal))[0];
+						const queryEmbedding = questionEmbedding ?? (await this.plugin.embeddingClient.embed([question], signal))[0];
 						let results = this.plugin.vectorStore.search(queryEmbedding, this.plugin.settings.vectorSearchMaxResults);
 
 						if (this.plugin.settings.enableHybridSearch) {
@@ -229,17 +282,13 @@ export class ChatPanel {
 				this.renderSources([]);
 			}
 
-			const history = this.plugin.chatHistory
-				.slice(-this.plugin.settings.chatHistoryMaxMessages)
-				.map((message) => `${message.role}: ${message.content}`)
-				.join("\n\n");
-
 			const prompt = [
 				useRag ? "请结合当前笔记和参考资料回答。" : "请结合当前笔记回答用户问题。如果当前笔记上下文为空，则直接回答用户问题。",
 				this.noteActionInstruction(),
 				currentNoteContext ? this.formatCurrentNoteContext(currentNoteContext) : "",
 				contextText ? `Vault 参考资料：\n${contextText}` : "",
-				`对话历史：\n${history}`,
+				memoryText ? `相关对话记忆（来自本会话历史，语义检索，已排除下方最近对话，按时间先后排序）：\n${memoryText}` : "",
+				recentText ? `最近对话（最近 ${recentMessages.length} 条，用于保持连贯性）：\n${recentText}` : "",
 				`用户问题：\n${question}`,
 			]
 				.filter(Boolean)
@@ -292,6 +341,21 @@ export class ChatPanel {
 
 		const markdownView = this.findCurrentMarkdownView();
 		const file = markdownView?.file instanceof TFile ? markdownView.file : null;
+
+		// 关联当前笔记开关：放在文件名旁边，控制是否把当前笔记作为上下文
+		const noteLinkButton = this.statusEl.createEl("button", {
+			cls: "clickable-icon ai-chat-icon-button ai-chat-note-link-button",
+		});
+		setIcon(noteLinkButton, this.useCurrentNote ? "link" : "unlink");
+		noteLinkButton.toggleClass("is-active", this.useCurrentNote);
+		noteLinkButton.setAttribute(
+			"aria-label",
+			this.useCurrentNote ? "已关联当前笔记（点击关闭）" : "未关联当前笔记（点击开启）"
+		);
+		noteLinkButton.onclick = (event) => {
+			event.stopPropagation();
+			this.setUseCurrentNote(!this.useCurrentNote);
+		};
 
 		// 极简单行：仅灰色文件名（去掉后缀、无图标无方框）；完整路径放在 tooltip
 		this.statusEl.createSpan({
@@ -434,6 +498,11 @@ export class ChatPanel {
 		this.selectedPromptName = name;
 		this.activePromptName = name ?? (this.useRag ? "普通提问 + Vault 检索" : "普通提问");
 		this.renderPromptFileButton();
+		this.renderContextStatus();
+	}
+
+	setUseCurrentNote(value: boolean) {
+		this.useCurrentNote = value;
 		this.renderContextStatus();
 	}
 
@@ -735,6 +804,8 @@ export class AiChatModal extends Modal {
 		this.host.load();
 		this.modalEl.addClass("ai-chat-modal");
 		this.panel.mount(this.contentEl);
+		// 手机端：输入栏浮动并随键盘高度上移
+		this.panel.enableKeyboardFloating();
 		// 打开后自动把光标聚焦到输入框（类似快速切换）
 		window.setTimeout(() => this.panel.inputEl?.focus(), 0);
 	}
