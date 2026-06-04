@@ -12,12 +12,15 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   embeddingModel: "text-embedding-3-small",
   embeddingProvider: "local",
   localEmbeddingModel: "Xenova/bge-small-zh-v1.5",
-  localModelPath: "AI Copilot/models", 
+  localModelPath: "AI Copilot/models",
   vectorSearchMaxResults: 8,
   chunkMaxChars: 1200,
   chunkOverlapChars: 150,
   excludedFolders: "Templates, Archive, .trash",
+  includedTextExtensions: "md, txt, csv, json, canvas",
+  maxTextFileSizeKb: 1024,
   chatHistoryMaxMessages: 30,
+  linkCurrentNote: true,
   indexLogMaxEntries: 50,
   enablePromptLibrary: true,
   promptLibraryPath: "AI Copilot/Prompts.md",
@@ -38,9 +41,7 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   enablePromptCommandRegistration: true,
   promptRunHistoryMaxEntries: 100,
   workflowOutputFolder: "AI Copilot/Outputs",
-  batchRunMaxFiles: 20,
-  includedTextExtensions: "md, txt, csv, json, canvas",   // ← 新增
-  maxTextFileSizeKb: 1024,                                 // ← 新增
+  batchRunMaxFiles: 20
 };
 
 export class AiSettingsTab extends PluginSettingTab {
@@ -86,7 +87,7 @@ export class AiSettingsTab extends PluginSettingTab {
           })
       );
     this.addTextSetting(containerEl, "本地 Embedding 模型", "Transformers.js 模型 ID（中文推荐 Xenova/bge-small-zh-v1.5）", "Xenova/bge-small-zh-v1.5", "localEmbeddingModel");
-	this.addTextSetting(containerEl, "本地模型目录", "离线模型与 wasm 存放的库内文件夹。模型放 <目录>/<模型ID>/，wasm 放 <目录>/_onnx_wasm/", "AI Copilot/models", "localModelPath");  
+    this.addTextSetting(containerEl, "本地模型目录", "离线模型与 wasm 存放的库内文件夹。模型放 <目录>/<模型ID>/，wasm 放 <目录>/_onnx_wasm/", "AI Copilot/models", "localModelPath");
   }
 
   renderPromptSettings(containerEl: HTMLElement) {
@@ -125,6 +126,8 @@ export class AiSettingsTab extends PluginSettingTab {
     this.addNumberSetting(containerEl, "Semantic weight", "语义权重", "0.7", "hybridSemanticWeight");
     this.addNumberSetting(containerEl, "Keyword weight", "关键词权重", "0.2", "hybridKeywordWeight");
     this.addNumberSetting(containerEl, "Recency weight", "最近编辑权重", "0.1", "hybridRecencyWeight");
+    this.addTextSetting(containerEl, "Included text extensions", "允许 AI 检索和索引的文本文件扩展名", "md, txt, csv, json, canvas", "includedTextExtensions");
+    this.addNumberSetting(containerEl, "Max text file size KB", "超过该大小的文本文件不会进入检索和索引", "1024", "maxTextFileSizeKb");
 
     new Setting(containerEl)
       .setName("Index actions")

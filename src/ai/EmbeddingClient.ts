@@ -1,3 +1,4 @@
+import { Platform } from "obsidian";
 import AiPlugin from "../main";
 import { ErrorFormatter } from "../errors/ErrorFormatter";
 
@@ -11,9 +12,15 @@ export class EmbeddingClient {
 		this.plugin = plugin;
 	}
 
+	// 手机端没有 Node fs / 真实绝对路径，本地模型（Transformers.js + onnxruntime-web）跑不起来，
+	// 所以只在桌面端用本地模型；移动端一律回退到 API embedding。
+	private useLocalEmbedding(): boolean {
+		return this.plugin.settings.embeddingProvider === "local" && !Platform.isMobile;
+	}
+
 	// 当前实际使用的 embedding 标识：用于索引一致性判断（不同来源/模型维度不同，不可混用）
 	getActiveModelId(): string {
-		return this.plugin.settings.embeddingProvider === "local"
+		return this.useLocalEmbedding()
 			? `local:${this.plugin.settings.localEmbeddingModel}`
 			: this.plugin.settings.embeddingModel;
 	}
@@ -21,7 +28,7 @@ export class EmbeddingClient {
 	async embed(inputs: string[], signal?: AbortSignal): Promise<number[][]> {
 		if (inputs.length === 0) return [];
 
-		if (this.plugin.settings.embeddingProvider === "local") {
+		if (this.useLocalEmbedding()) {
 			return this.embedLocal(inputs, signal);
 		}
 
@@ -93,7 +100,7 @@ export class EmbeddingClient {
 			const modelRoot = this.plugin.settings.localModelPath || "AI Copilot/models";
 
 			env.allowLocalModels = true;
-			// 不回退联网：缺文件就直接报错，便于定位是哪个文件没放对，而不是又去连超时的 HF。
+			// 允许联网回退：本地缺文件时自动从 HuggingFace 下载模型，方便首次使用。
 			env.allowRemoteModels = true;
 			env.useBrowserCache = false;
 

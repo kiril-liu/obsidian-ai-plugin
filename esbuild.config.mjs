@@ -31,7 +31,12 @@ const context = await esbuild.context({
 	outfile: "main.js",
 	minify: production,
 	banner: {
-		js: "const import_meta_url = require('url').pathToFileURL(__filename).href;",
+		js: `var import_meta_url;
+try {
+	import_meta_url = require('url').pathToFileURL(__filename).href;
+} catch (e) {
+	import_meta_url = typeof __filename !== "undefined" ? __filename : "";
+}`,
 	},
 	define: {
 		"import.meta.url": "import_meta_url",

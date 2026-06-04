@@ -44,6 +44,8 @@ export class ChatPanel {
 		this.host = host;
 		this.app = app;
 		this.noteActionManager = new NoteActionManager(app);
+		// 记住上次「关联当前笔记」开关：从设置读取，跨打开/重启保留
+		this.useCurrentNote = plugin.settings.linkCurrentNote ?? true;
 	}
 
 	mount(containerEl: HTMLElement) {
@@ -503,6 +505,9 @@ export class ChatPanel {
 
 	setUseCurrentNote(value: boolean) {
 		this.useCurrentNote = value;
+		// 持久化，使下次打开（含手机端新弹层）沿用上次的值
+		this.plugin.settings.linkCurrentNote = value;
+		void this.plugin.saveSettings();
 		this.renderContextStatus();
 	}
 
@@ -586,6 +591,7 @@ export class ChatPanel {
 			commonPrefix++;
 		}
 
+		let rebuilt = false;
 		if (commonPrefix === rendered.length && domCount === rendered.length) {
 			// DOM 与历史前缀一致：只追加新增的消息
 			for (let i = commonPrefix; i < history.length; i++) {
@@ -593,6 +599,7 @@ export class ChatPanel {
 			}
 		} else {
 			// 历史被替换 / 清空 / 截断 / 视图重建：整体重建
+			rebuilt = true;
 			this.messagesEl.empty();
 			for (const message of history) {
 				this.renderMessage(message);
@@ -600,7 +607,13 @@ export class ChatPanel {
 		}
 
 		this.renderedMessages = [...history];
-		this.scrollLatestUserMessageToTop();
+		// 整体重建（如恢复历史对话）：滚到底部显示最新消息；
+		// 增量追加（正常提问）：把最新提问顶到顶部，便于阅读其下方的回答。
+		if (rebuilt) {
+			this.scrollToBottom();
+		} else {
+			this.scrollLatestUserMessageToTop();
+		}
 	}
 
 	scrollLatestUserMessageToTop() {
@@ -627,6 +640,22 @@ export class ChatPanel {
 		}
 
 		this.messagesEl.scrollTop = last.offsetTop;
+	}
+
+	// 滚动到消息区底部（用于恢复历史对话：直接看到最新消息，而不是从顶部开始）
+	scrollToBottom() {
+		if (!this.messagesEl) return;
+
+		this.messagesEl.querySelectorAll(".ai-chat-scroll-spacer").forEach((el) => el.remove());
+
+		const toBottom = () => {
+			if (!this.messagesEl) return;
+			this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+		};
+
+		// 先滚一次；AI 消息的 Markdown 是异步渲染，等布局完成后再滚一次确保停在底部
+		toBottom();
+		window.requestAnimationFrame(toBottom);
 	}
 
 	renderMessage(message: ChatMessage) {

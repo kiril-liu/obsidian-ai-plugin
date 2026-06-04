@@ -21,6 +21,7 @@ export interface AiPluginSettings {
   includedTextExtensions: string;
   maxTextFileSizeKb: number;
   chatHistoryMaxMessages: number;
+  linkCurrentNote: boolean;
   indexLogMaxEntries: number;
   enablePromptLibrary: boolean;
   promptLibraryPath: string;
