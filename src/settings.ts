@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   includedTextExtensions: "md, txt, csv, json, canvas",
   maxTextFileSizeKb: 1024,
   chatHistoryMaxMessages: 30,
+  enableConversationRetrieval: false,
   linkCurrentNote: true,
   indexLogMaxEntries: 50,
   enablePromptLibrary: true,
@@ -123,6 +124,7 @@ export class AiSettingsTab extends PluginSettingTab {
     this.addToggleSetting(containerEl, "External index storage", "索引保存到独立文件", "enableExternalIndexStorage");
     this.addTextSetting(containerEl, "Index storage folder", "索引文件夹", ".obsidian/plugins/obsidian-ai-copilot/index", "indexStorageFolder");
     this.addToggleSetting(containerEl, "Hybrid search", "混合检索", "enableHybridSearch");
+    this.addToggleSetting(containerEl, "对话语义检索", "默认关闭。开启后会对每条提问做 Embedding 以检索本会话历史（API 模式下每条消息都要请求，较慢；建议配置本地 Embedding 后再开启）；关闭时仅按最近 N 条对话提供上下文。", "enableConversationRetrieval");
     this.addNumberSetting(containerEl, "Semantic weight", "语义权重", "0.7", "hybridSemanticWeight");
     this.addNumberSetting(containerEl, "Keyword weight", "关键词权重", "0.2", "hybridKeywordWeight");
     this.addNumberSetting(containerEl, "Recency weight", "最近编辑权重", "0.1", "hybridRecencyWeight");

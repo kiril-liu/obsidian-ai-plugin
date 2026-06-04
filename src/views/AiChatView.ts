@@ -224,12 +224,17 @@ export class ChatPanel {
 			let sourcesMarkdown = "";
 			let sources: any[] = [];
 
-			// 当前问题只 embed 一次，会话记忆检索与 Vault 检索共用
+			// 对话语义检索默认关闭：关闭时不对提问做 Embedding，仅按最近 N 条对话提供上下文，避免每条消息都走 API 变慢
+			const useConversationRetrieval = this.plugin.settings.enableConversationRetrieval ?? false;
+
+			// 当前问题只 embed 一次，会话记忆检索与 Vault 检索共用；仅在需要时（对话检索开启或 Vault 检索）才发起 Embedding
 			let questionEmbedding: number[] | null = null;
-			try {
-				questionEmbedding = (await this.plugin.embeddingClient.embed([question], signal))[0] ?? null;
-			} catch (error) {
-				questionEmbedding = null;
+			if (useConversationRetrieval || useRag) {
+				try {
+					questionEmbedding = (await this.plugin.embeddingClient.embed([question], signal))[0] ?? null;
+				} catch (error) {
+					questionEmbedding = null;
+				}
 			}
 
 			// 最近 N 条窗口：保证局部连贯性与指代消解（chatHistory 已截断到 N，末尾是刚加入的当前问题，单独展示故去掉）
@@ -240,7 +245,7 @@ export class ChatPanel {
 			// 会话记忆：在当前会话独立向量库里检索相关历史（与 Vault 索引隔离，不跨会话）
 			// 去重：已经在“最近 N 条窗口”里的消息不再重复进入语义记忆
 			let memoryText = "";
-			if (questionEmbedding) {
+			if (useConversationRetrieval && questionEmbedding) {
 				const conversation = this.plugin.ensureActiveConversation();
 				const memoryHits = this.plugin.chatMemory
 					.search(
