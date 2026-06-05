@@ -1,13 +1,11 @@
 export type PromptMode = "basic" | "keyword" | "rag";
 export type PromptOutputMode = "chat" | "append" | "replace_selection";
 export type OutputAction = "insert_at_cursor" | "append_to_note" | "replace_selection" | "copy_to_clipboard" | "cancel";
-export type PromptWorkflowOutputTarget = "chat" | "current_note" | "new_note" | "clipboard";
 
 export interface AiPluginSettings {
   apiKey: string;
   baseUrl: string;
   model: string;
-  maxTokens: number;
   cachedModels: string[];
   cachedModelsBaseUrl: string;
   vaultSearchMaxResults: number;
@@ -30,9 +28,6 @@ export interface AiPluginSettings {
   enableConversationRetrieval: boolean;
   linkCurrentNote: boolean;
   indexLogMaxEntries: number;
-  enablePromptLibrary: boolean;
-  promptLibraryPath: string;
-  enablePromptFolder: boolean;
   promptFolderPath: string;
   enableOutputPreview: boolean;
   requestTimeoutSeconds: number;
@@ -46,10 +41,6 @@ export interface AiPluginSettings {
   hybridKeywordWeight: number;
   hybridRecencyWeight: number;
   autoUpdateIndexOnStartup: boolean;
-  enablePromptCommandRegistration: boolean;
-  promptRunHistoryMaxEntries: number;
-  workflowOutputFolder: string;
-  batchRunMaxFiles: number;
 }
 
 export interface VaultSearchResult {
@@ -233,40 +224,6 @@ export interface DailyNoteContext {
   combinedRecentContent: string;
 }
 
-export interface PromptCommandBinding {
-  templateName: string;
-  commandId: string;
-  commandName: string;
-}
-
-export interface PromptRunHistoryEntry {
-  id: string;
-  templateName: string;
-  sourcePath?: string;
-  outputTarget: PromptWorkflowOutputTarget;
-  inputFilePath?: string;
-  outputFilePath?: string;
-  status: "success" | "failed" | "cancelled";
-  error?: string;
-  createdAt: string;
-  durationMs: number;
-  sourceCount?: number;
-}
-
-export interface BatchPromptRunOptions {
-  templateName: string;
-  filePaths: string[];
-  outputTarget: PromptWorkflowOutputTarget;
-  outputFolder?: string;
-}
-
-export interface BatchPromptRunResult {
-  total: number;
-  success: number;
-  failed: number;
-  outputFiles: string[];
-}
-
 export interface PluginData {
   settings?: Partial<AiPluginSettings>;
   vectorIndex?: VaultVectorIndex | null;
@@ -275,5 +232,4 @@ export interface PluginData {
   activeChatId?: string;
   indexLogs?: IndexLogEntry[];
   lastIndexError?: string;
-  promptRunHistory?: PromptRunHistoryEntry[];
 }

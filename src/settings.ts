@@ -7,7 +7,6 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   apiKey: "",
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4o-mini",
-  maxTokens: 0,
   cachedModels: [],
   cachedModelsBaseUrl: "",
   vaultSearchMaxResults: 6,
@@ -30,9 +29,6 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   enableConversationRetrieval: false,
   linkCurrentNote: true,
   indexLogMaxEntries: 50,
-  enablePromptLibrary: true,
-  promptLibraryPath: "AI Copilot/Prompts.md",
-  enablePromptFolder: true,
   promptFolderPath: "AI Copilot/Prompts",
   enableOutputPreview: true,
   requestTimeoutSeconds: 90,
@@ -45,11 +41,7 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   hybridSemanticWeight: 0.7,
   hybridKeywordWeight: 0.2,
   hybridRecencyWeight: 0.1,
-  autoUpdateIndexOnStartup: false,
-  enablePromptCommandRegistration: true,
-  promptRunHistoryMaxEntries: 100,
-  workflowOutputFolder: "AI Copilot/Outputs",
-  batchRunMaxFiles: 20
+  autoUpdateIndexOnStartup: false
 };
 
 export class AiSettingsTab extends PluginSettingTab {
@@ -70,7 +62,6 @@ export class AiSettingsTab extends PluginSettingTab {
     this.renderPromptSettings(containerEl);
     this.renderDailySettings(containerEl);
     this.renderIndexSettings(containerEl);
-    this.renderWorkflowSettings(containerEl);
   }
 
   renderModelSettings(containerEl: HTMLElement) {
@@ -151,9 +142,6 @@ export class AiSettingsTab extends PluginSettingTab {
 
     // 也允许手动输入模型名（首次未刷新、或下拉里没有的私有模型）
     this.addTextSetting(containerEl, "Model（手动输入）", "下拉没有想要的模型时，可在此直接手敲模型名。", "gpt-4o-mini", "model");
-
-    // max_tokens 不写死：填 0 表示不发送该参数，避免不同模型上限不同（32768 vs 16384）导致 400
-    this.addNumberSetting(containerEl, "Max tokens", "回复最大 token 数；填 0 表示不限制（不发送 max_tokens，避免切模型后报 400）。", "0", "maxTokens");
 
     // Embedding 总开关：默认关闭。关闭后不加载/调用任何 Embedding（不消耗 token、不加载本地模型），
     // Vault 检索退化为关键词检索，对话语义检索强制关闭。开启后再选择本地或远程 API。
@@ -245,21 +233,15 @@ export class AiSettingsTab extends PluginSettingTab {
 
   renderPromptSettings(containerEl: HTMLElement) {
     new Setting(containerEl).setName("Prompt Library").setHeading();
-    this.addToggleSetting(containerEl, "Enable prompt library", "启用提示词库", "enablePromptLibrary");
-    this.addToggleSetting(containerEl, "Enable prompt folder", "读取提示词文件夹", "enablePromptFolder");
-    this.addTextSetting(containerEl, "Prompt folder path", "提示词文件夹", "AI Copilot/Prompts", "promptFolderPath");
+    this.addTextSetting(containerEl, "Prompt folder path", "提示词文件夹（内置生活模板始终可用，这里可额外读取自定义模板）", "AI Copilot/Prompts", "promptFolderPath");
     this.addToggleSetting(containerEl, "Enable output preview", "写入前预览", "enableOutputPreview");
 
     new Setting(containerEl)
       .setName("Prompt actions")
       .addButton((button) =>
-        button.setButtonText("创建生活模板").onClick(async () => {
-          await this.plugin.promptManager.createLifePromptPack();
-        })
-      )
-      .addButton((button) =>
-        button.setButtonText("刷新 Prompt 命令").onClick(async () => {
-          await this.plugin.promptCommandRegistry.reloadCommandsNotice();
+        button.setButtonText("刷新提示词").onClick(async () => {
+          await this.plugin.promptManager.loadTemplates(true);
+          new Notice("已刷新提示词模板");
         })
       );
   }
@@ -288,20 +270,6 @@ export class AiSettingsTab extends PluginSettingTab {
       .addButton((button) => button.setButtonText("构建索引").onClick(() => this.plugin.vaultIndexer.buildVectorIndex()))
       .addButton((button) => button.setButtonText("更新索引").onClick(() => this.plugin.vaultIndexer.updateVectorIndex()))
       .addButton((button) => button.setButtonText("清空索引").onClick(() => this.plugin.vaultIndexer.clearVectorIndex()));
-  }
-
-  renderWorkflowSettings(containerEl: HTMLElement) {
-    new Setting(containerEl).setName("工作流").setHeading();
-    this.addToggleSetting(containerEl, "Register prompt commands", "模板注册为命令", "enablePromptCommandRegistration");
-    this.addTextSetting(containerEl, "Workflow output folder", "输出文件夹", "AI Copilot/Outputs", "workflowOutputFolder");
-    this.addNumberSetting(containerEl, "Prompt run history max", "历史条数", "100", "promptRunHistoryMaxEntries");
-    this.addNumberSetting(containerEl, "Batch run max files", "批量最大文件数", "20", "batchRunMaxFiles");
-
-    new Setting(containerEl)
-      .setName("History")
-      .addButton((button) =>
-        button.setButtonText("清空运行历史").onClick(() => this.plugin.promptRunHistory.clear())
-      );
   }
 
   addTextSetting(containerEl: HTMLElement, name: string, desc: string, placeholder: string, key: keyof AiPluginSettings) {

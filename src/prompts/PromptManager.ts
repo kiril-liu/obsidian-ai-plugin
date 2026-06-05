@@ -1,8 +1,7 @@
-import { Notice, TFile, normalizePath } from "obsidian";
+import { normalizePath } from "obsidian";
 import AiPlugin from "../main";
 import { LIFE_PROMPT_PACK } from "./LifePromptPack";
 import { PromptRenderContext, PromptTemplate, PromptTemplateMetadata } from "../types";
-import { ensureFolder, upsertFile } from "../utils/FileUtils";
 
 export class PromptManager {
 	plugin: AiPlugin;
@@ -17,20 +16,14 @@ export class PromptManager {
 
 		const templates: PromptTemplate[] = [];
 
-		if (this.plugin.settings.enablePromptLibrary) {
-			const file = this.plugin.app.vault.getAbstractFileByPath(this.plugin.settings.promptLibraryPath);
-			if (file instanceof TFile) {
-				templates.push(...this.parseTemplates(await this.plugin.app.vault.cachedRead(file), file.path));
-			}
-		}
+		// 内置生活模板始终可用，无需创建文件
+		templates.push(...this.parseTemplates(LIFE_PROMPT_PACK, "内置：Life Prompt Pack"));
 
-		if (this.plugin.settings.enablePromptFolder) {
-			const folderPath = normalizePath(this.plugin.settings.promptFolderPath);
-			const files = this.plugin.app.vault.getMarkdownFiles().filter((file) => file.path.startsWith(folderPath + "/"));
+		const folderPath = normalizePath(this.plugin.settings.promptFolderPath);
+		const files = this.plugin.app.vault.getMarkdownFiles().filter((file) => file.path.startsWith(folderPath + "/"));
 
-			for (const file of files) {
-				templates.push(...this.parseTemplates(await this.plugin.app.vault.cachedRead(file), file.path));
-			}
+		for (const file of files) {
+			templates.push(...this.parseTemplates(await this.plugin.app.vault.cachedRead(file), file.path));
 		}
 
 		this.templates = templates.sort((a, b) => {
@@ -125,21 +118,5 @@ export class PromptManager {
 			lastAnswer: [...this.plugin.chatHistory].reverse().find((message) => message.role === "AI")?.content ?? "",
 			...partial,
 		};
-	}
-
-	async createLifePromptPack() {
-		const folder = normalizePath(this.plugin.settings.promptFolderPath);
-		await ensureFolder(this.plugin.app, folder);
-
-		const path = normalizePath(`${folder}/Life Prompt Pack.md`);
-		await upsertFile(this.plugin.app, path, LIFE_PROMPT_PACK);
-
-		await this.loadTemplates(true);
-
-		if (this.plugin.settings.enablePromptCommandRegistration) {
-			await this.plugin.promptCommandRegistry.registerPromptTemplateCommands();
-		}
-
-		new Notice("已创建 Life Prompt Pack");
 	}
 }

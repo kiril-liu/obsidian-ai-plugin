@@ -5,9 +5,7 @@ import { registerDailyCommands } from "./commands/dailyCommands";
 import { registerNoteCommands } from "./commands/noteCommands";
 import { registerPromptCommands } from "./commands/promptCommands";
 import { registerVaultCommands } from "./commands/vaultCommands";
-import { registerWorkflowCommands } from "./commands/workflowCommands";
 import { DailyNoteManager } from "./daily/DailyNoteManager";
-import { PromptRunHistory } from "./history/PromptRunHistory";
 import { IndexStorage } from "./index/IndexStorage";
 import { ProgressTracker } from "./progress/ProgressTracker";
 import { PromptManager } from "./prompts/PromptManager";
@@ -19,8 +17,6 @@ import { ChatMemoryStore } from "./memory/ChatMemoryStore";
 import { DEFAULT_SETTINGS, AiSettingsTab } from "./settings";
 import { AiPluginSettings, ChatConversation, ChatMessage, IndexLogEntry, PluginData } from "./types";
 import { AI_CHAT_VIEW_TYPE, AiChatModal, AiChatView, ChatPanel } from "./views/AiChatView";
-import { BatchPromptRunner } from "./workflows/BatchPromptRunner";
-import { PromptCommandRegistry } from "./workflows/PromptCommandRegistry";
 
 export default class AiPlugin extends Plugin {
 	settings: AiPluginSettings;
@@ -37,9 +33,6 @@ export default class AiPlugin extends Plugin {
 	promptManager: PromptManager;
 	progressTracker: ProgressTracker;
 	dailyNoteManager: DailyNoteManager;
-	promptRunHistory: PromptRunHistory;
-	promptCommandRegistry: PromptCommandRegistry;
-	batchPromptRunner: BatchPromptRunner;
 
 	chatHistory: ChatMessage[] = [];
 	chatConversations: ChatConversation[] = [];
@@ -68,10 +61,6 @@ export default class AiPlugin extends Plugin {
 		this.promptManager = new PromptManager(this);
 		this.progressTracker = new ProgressTracker(this);
 		this.dailyNoteManager = new DailyNoteManager(this);
-		this.promptRunHistory = new PromptRunHistory(this);
-		this.promptRunHistory.load(this.loadedData.promptRunHistory ?? []);
-		this.promptCommandRegistry = new PromptCommandRegistry(this);
-		this.batchPromptRunner = new BatchPromptRunner(this);
 
 		this.registerView(AI_CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => new AiChatView(leaf, this));
 
@@ -84,15 +73,10 @@ export default class AiPlugin extends Plugin {
 		registerVaultCommands(this);
 		registerPromptCommands(this);
 		registerDailyCommands(this);
-		registerWorkflowCommands(this);
 
 		this.addSettingTab(new AiSettingsTab(this.app, this));
 
 		await this.vaultIndexer.loadIndexOnStartup();
-
-		if (this.settings.enablePromptCommandRegistration) {
-			await this.promptCommandRegistry.registerPromptTemplateCommands();
-		}
 
 		if (this.settings.autoUpdateIndexOnStartup) {
 			setTimeout(() => this.vaultIndexer.updateVectorIndex(), 2000);
@@ -119,7 +103,6 @@ export default class AiPlugin extends Plugin {
 			activeChatId: this.activeChatId ?? undefined,
 			indexLogs: this.indexLogs,
 			lastIndexError: this.lastIndexError,
-			promptRunHistory: this.promptRunHistory.entries,
 		});
 	}
 

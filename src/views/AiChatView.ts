@@ -240,7 +240,7 @@ export class ChatPanel {
 			let sourcesMarkdown = "";
 			let sources: any[] = [];
 
-			// Embedding 总开关：关闭时不做任何向量化，对话语义检索强制关闭，Vault 检索退化为关键词检索
+			// Embedding 总开关：关闭时不做任何向量化，对话语义检索与 Vault 检索一并关闭（两者都依赖 Embedding）
 			const embeddingEnabled = this.plugin.settings.enableEmbedding ?? false;
 			// 对话语义检索默认关闭：关闭时不对提问做 Embedding，仅按最近 N 条对话提供上下文，避免每条消息都走 API 变慢
 			const useConversationRetrieval = embeddingEnabled && (this.plugin.settings.enableConversationRetrieval ?? false);
@@ -276,13 +276,14 @@ export class ChatPanel {
 				memoryText = this.plugin.chatMemory.formatForPrompt(memoryHits);
 			}
 
-			if (useRag) {
+			// Vault 检索（语义/索引）依赖 Embedding：关闭 Embedding 时直接跳过检索，不再退化为关键词检索
+			if (useRag && embeddingEnabled) {
 				this.plugin.progressTracker.setStep("检索 Vault");
 
 				try {
 					const index = this.plugin.vectorStore.getIndex();
 
-					if (embeddingEnabled && index && index.chunks.length > 0) {
+					if (index && index.chunks.length > 0) {
 						const queryEmbedding = questionEmbedding ?? (await this.plugin.embeddingClient.embed([question], signal))[0];
 						let results = this.plugin.vectorStore.search(queryEmbedding, this.plugin.settings.vectorSearchMaxResults);
 
@@ -291,13 +292,9 @@ export class ChatPanel {
 						}
 
 						sources = SourceFormatter.fromResults(results);
-					} else {
-						const keywordResults = await this.plugin.keywordSearch.search(question);
-						sources = SourceFormatter.fromResults(keywordResults);
 					}
 				} catch (error) {
-					const keywordResults = await this.plugin.keywordSearch.search(question);
-					sources = SourceFormatter.fromResults(keywordResults);
+					sources = [];
 				}
 
 				contextText = SourceFormatter.toContextText(sources);
@@ -542,6 +539,14 @@ export class ChatPanel {
 	}
 
 	setUseRag(value: boolean) {
+		// Embedding 关闭时 Vault 检索不可用（索引与检索都依赖 Embedding）
+		if (value && !(this.plugin.settings.enableEmbedding ?? false)) {
+			new Notice("Vault 检索需要先在设置中开启 Embedding");
+			this.useRag = false;
+			this.renderVaultSearchButton();
+			this.renderContextStatus();
+			return;
+		}
 		this.useRag = value;
 		if (!this.selectedPromptName) {
 			this.activePromptName = value ? "普通提问 + Vault 检索" : "普通提问";
@@ -552,10 +557,16 @@ export class ChatPanel {
 
 	renderVaultSearchButton() {
 		if (!this.vaultSearchButtonEl) return;
-		this.vaultSearchButtonEl.toggleClass("is-active", this.useRag);
+		const embeddingEnabled = this.plugin.settings.enableEmbedding ?? false;
+		this.vaultSearchButtonEl.toggleClass("is-active", this.useRag && embeddingEnabled);
+		this.vaultSearchButtonEl.toggleClass("is-disabled", !embeddingEnabled);
 		this.vaultSearchButtonEl.setAttribute(
 			"aria-label",
-			this.useRag ? "Vault 检索：开（长按/右键设置）" : "Vault 检索：关（长按/右键设置）"
+			!embeddingEnabled
+				? "Vault 检索：需先开启 Embedding（长按/右键设置）"
+				: this.useRag
+					? "Vault 检索：开（长按/右键设置）"
+					: "Vault 检索：关（长按/右键设置）"
 		);
 	}
 

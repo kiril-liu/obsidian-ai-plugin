@@ -12,7 +12,7 @@ export class AiClient {
 	// 系统提示词
 	private static SYSTEM_PROMPT = "你是一个帮助用户整理 Obsidian 笔记的中文 AI 助手。";
 
-	// 统一构造请求体；max_tokens 不写死：仅当用户设置 > 0 时才发送，避免切换模型后因上限不同（如 32768 vs 16384）报 400
+	// 统一构造请求体；不发送 max_tokens，避免不同模型上限不同（如 32768 vs 16384）切换后报 400
 	private buildBody(prompt: string, stream: boolean): Record<string, unknown> {
 		const body: Record<string, unknown> = {
 			model: this.plugin.settings.model,
@@ -24,11 +24,6 @@ export class AiClient {
 		};
 
 		if (stream) body.stream = true;
-
-		const maxTokens = this.plugin.settings.maxTokens;
-		if (typeof maxTokens === "number" && maxTokens > 0) {
-			body.max_tokens = maxTokens;
-		}
 
 		return body;
 	}
