@@ -17,6 +17,8 @@ export class ChatMemoryStore {
 	// 增量记忆：把一条新消息向量化后追加进当前会话独立向量库；
 	// 与 Vault 索引完全隔离，且不随 chatHistory 截断而丢失
 	async remember(conversation: ChatConversation, message: ChatMessage) {
+		// Embedding 总开关关闭时不做会话记忆向量化（不消耗 token / 不加载本地模型）
+		if (!this.plugin.settings.enableEmbedding) return;
 		if (this.shouldSkip(message)) return;
 
 		const modelId = this.plugin.embeddingClient.getActiveModelId();

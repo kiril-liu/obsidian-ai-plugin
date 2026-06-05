@@ -12,6 +12,7 @@ export interface AiPluginSettings {
   cachedModelsBaseUrl: string;
   vaultSearchMaxResults: number;
   vaultSearchMaxCharsPerResult: number;
+  enableEmbedding: boolean;
   embeddingBaseUrl: string;
   embeddingModel: string;
   cachedEmbeddingModels: string[];

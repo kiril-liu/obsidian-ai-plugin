@@ -37,7 +37,8 @@ export class ChatPanel {
 	promptTemplates: PromptTemplate[] = [];
 	noteActionManager: NoteActionManager;
 	renderedMessages: ChatMessage[] = [];
-	keyboardViewportHandler: (() => void) | null = null;
+	keyboardShowHandler: ((event: Event) => void) | null = null;
+	keyboardHideHandler: (() => void) | null = null;
 
 	constructor(plugin: AiPlugin, host: Component, app: App) {
 		this.plugin = plugin;
@@ -148,32 +149,40 @@ export class ChatPanel {
 	}
 
 	unmount() {
-		const viewport = window.visualViewport;
-		if (viewport && this.keyboardViewportHandler) {
-			viewport.removeEventListener("resize", this.keyboardViewportHandler);
-			viewport.removeEventListener("scroll", this.keyboardViewportHandler);
-			window.removeEventListener("resize", this.keyboardViewportHandler);
-			this.keyboardViewportHandler = null;
+		if (this.keyboardShowHandler) {
+			window.removeEventListener("keyboardWillShow", this.keyboardShowHandler);
+			window.removeEventListener("keyboardDidShow", this.keyboardShowHandler);
+			this.keyboardShowHandler = null;
+		}
+		if (this.keyboardHideHandler) {
+			window.removeEventListener("keyboardWillHide", this.keyboardHideHandler);
+			window.removeEventListener("keyboardDidHide", this.keyboardHideHandler);
+			this.keyboardHideHandler = null;
 		}
 		this.plugin.unregisterChatPanel(this);
 	}
 
-	// 手机端：让输入栏浮动并随键盘高度上移（依赖 visualViewport）
+	// 手机端：让输入栏浮动并随键盘高度上移。
+	// 安卓 Obsidian webview 下键盘是“覆盖式”弹出，visualViewport / VirtualKeyboard 都拿不到高度；
+	// 唯一可靠来源是 Capacitor 在 window 上派发的原生键盘事件（携带 keyboardHeight，单位 px）。
+	// 快速切换的输入框就是靠它浮起的，这里只监听这组事件，不再做任何兜底重算。
 	enableKeyboardFloating() {
-		const viewport = window.visualViewport;
-		if (!viewport || !this.containerEl) return;
+		if (!this.containerEl) return;
 
-		const update = () => {
-			const keyboardHeight = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
-			this.containerEl.setCssProps({ "--ai-chat-keyboard-height": `${keyboardHeight}px` });
+		this.keyboardShowHandler = (event: Event) => {
+			const height = (event as any).keyboardHeight;
+			this.containerEl.setCssProps({
+				"--ai-chat-keyboard-height": `${Math.max(0, Math.round(height || 0))}px`,
+			});
+		};
+		this.keyboardHideHandler = () => {
+			this.containerEl.setCssProps({ "--ai-chat-keyboard-height": "0px" });
 		};
 
-		this.keyboardViewportHandler = update;
-		viewport.addEventListener("resize", update);
-		viewport.addEventListener("scroll", update);
-		// 兜底：部分移动端 webview 不触发 visualViewport 事件，补一个 window resize 监听
-		window.addEventListener("resize", update);
-		update();
+		window.addEventListener("keyboardWillShow", this.keyboardShowHandler);
+		window.addEventListener("keyboardDidShow", this.keyboardShowHandler);
+		window.addEventListener("keyboardWillHide", this.keyboardHideHandler);
+		window.addEventListener("keyboardDidHide", this.keyboardHideHandler);
 	}
 
 	async send(useRag = false) {
@@ -231,12 +240,14 @@ export class ChatPanel {
 			let sourcesMarkdown = "";
 			let sources: any[] = [];
 
+			// Embedding 总开关：关闭时不做任何向量化，对话语义检索强制关闭，Vault 检索退化为关键词检索
+			const embeddingEnabled = this.plugin.settings.enableEmbedding ?? false;
 			// 对话语义检索默认关闭：关闭时不对提问做 Embedding，仅按最近 N 条对话提供上下文，避免每条消息都走 API 变慢
-			const useConversationRetrieval = this.plugin.settings.enableConversationRetrieval ?? false;
+			const useConversationRetrieval = embeddingEnabled && (this.plugin.settings.enableConversationRetrieval ?? false);
 
 			// 当前问题只 embed 一次，会话记忆检索与 Vault 检索共用；仅在需要时（对话检索开启或 Vault 检索）才发起 Embedding
 			let questionEmbedding: number[] | null = null;
-			if (useConversationRetrieval || useRag) {
+			if (useConversationRetrieval || (useRag && embeddingEnabled)) {
 				try {
 					questionEmbedding = (await this.plugin.embeddingClient.embed([question], signal))[0] ?? null;
 				} catch (error) {
@@ -271,7 +282,7 @@ export class ChatPanel {
 				try {
 					const index = this.plugin.vectorStore.getIndex();
 
-					if (index && index.chunks.length > 0) {
+					if (embeddingEnabled && index && index.chunks.length > 0) {
 						const queryEmbedding = questionEmbedding ?? (await this.plugin.embeddingClient.embed([question], signal))[0];
 						let results = this.plugin.vectorStore.search(queryEmbedding, this.plugin.settings.vectorSearchMaxResults);
 

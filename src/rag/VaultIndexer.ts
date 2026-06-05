@@ -96,6 +96,11 @@ export class VaultIndexer {
 	}
 
 	async buildVectorIndex() {
+		if (!this.plugin.settings.enableEmbedding) {
+			new Notice("Embedding 已关闭：请先在设置中开启 Embedding 再构建索引。");
+			return;
+		}
+
 		try {
 			const signal = this.plugin.progressTracker.start("构建 Vault 向量索引", ["扫描文件", "切分文本", "生成 Embedding", "保存索引"]);
 
@@ -124,6 +129,11 @@ export class VaultIndexer {
 
 	// 增量更新：只重新切分 / Embedding 新增或修改过的文件，复用未变化文件的片段，并丢弃已删除文件
 	async updateVectorIndex() {
+		if (!this.plugin.settings.enableEmbedding) {
+			new Notice("Embedding 已关闭：请先在设置中开启 Embedding 再更新索引。");
+			return;
+		}
+
 		if (!this.isIndexReusable()) {
 			// 首次构建或配置已变更，退回全量构建
 			await this.buildVectorIndex();

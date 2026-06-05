@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS: AiPluginSettings = {
   cachedModelsBaseUrl: "",
   vaultSearchMaxResults: 6,
   vaultSearchMaxCharsPerResult: 1200,
+  enableEmbedding: false,
   embeddingBaseUrl: "https://api.openai.com/v1",
   embeddingModel: "text-embedding-3-small",
   cachedEmbeddingModels: [],
@@ -154,72 +155,92 @@ export class AiSettingsTab extends PluginSettingTab {
     // max_tokens 不写死：填 0 表示不发送该参数，避免不同模型上限不同（32768 vs 16384）导致 400
     this.addNumberSetting(containerEl, "Max tokens", "回复最大 token 数；填 0 表示不限制（不发送 max_tokens，避免切模型后报 400）。", "0", "maxTokens");
 
-    this.addTextSetting(containerEl, "Embedding Base URL", "Embedding API", "https://api.openai.com/v1", "embeddingBaseUrl");
-
-    // Embedding 模型：下拉选择（来自缓存列表），刷新按钮拉取 Embedding Base URL 的 GET /v1/models 并筛选含 "embed" 的模型
+    // Embedding 总开关：默认关闭。关闭后不加载/调用任何 Embedding（不消耗 token、不加载本地模型），
+    // Vault 检索退化为关键词检索，对话语义检索强制关闭。开启后再选择本地或远程 API。
     new Setting(containerEl)
-      .setName("Embedding Model")
-      .setDesc("Embedding 模型。填好 Embedding Base URL 与 API Key 后点右侧刷新，从该地址拉取并筛出 embedding 模型；列表会缓存。")
-      .addDropdown((dropdown) => {
-        const models = this.plugin.settings.cachedEmbeddingModels ?? [];
-        const current = this.plugin.settings.embeddingModel;
-        const options = models.length
-          ? (models.includes(current) ? models : [current, ...models].filter(Boolean))
-          : [current].filter(Boolean);
-
-        if (options.length === 0) {
-          dropdown.addOption("", "（请先刷新模型列表）");
-        } else {
-          for (const id of options) dropdown.addOption(id, id);
-        }
-
-        dropdown.setValue(current);
-        dropdown.onChange(async (value) => {
-          this.plugin.settings.embeddingModel = value;
+      .setName("启用 Embedding")
+      .setDesc("默认关闭。关闭后不会做任何向量化：不消耗 token、不加载本地模型，Vault 检索退化为纯关键词检索。开启后可在下方选择本地或远程 API。")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableEmbedding ?? false).onChange(async (value) => {
+          this.plugin.settings.enableEmbedding = value;
           await this.plugin.saveSettings();
-        });
-      })
-      .addExtraButton((button) =>
-        button
-          .setIcon("refresh-cw")
-          .setTooltip("刷新 Embedding 模型列表")
-          .onClick(async () => {
-            try {
-              const all = await this.plugin.aiClient.listModels(this.plugin.settings.embeddingBaseUrl);
-              const embeds = all.filter((id) => id.toLowerCase().includes("embed"));
-              const models = embeds.length ? embeds : all;
-              this.plugin.settings.cachedEmbeddingModels = models;
-              this.plugin.settings.cachedEmbeddingModelsBaseUrl = this.plugin.settings.embeddingBaseUrl;
-              if (models.length && !models.includes(this.plugin.settings.embeddingModel)) {
-                this.plugin.settings.embeddingModel = models[0];
-              }
+          this.display();
+        })
+      );
+
+    if (this.plugin.settings.enableEmbedding) {
+      // 开启后先选运行方式：local＝纯插件内跑（离线、无 token）；api＝远程接口
+      new Setting(containerEl)
+        .setName("Embedding 运行方式")
+        .setDesc("local＝纯插件内跑（Transformers.js，离线、无 token 消耗）；api＝调用远程 Embedding 接口。切换后需重建索引。")
+        .addDropdown((dropdown) =>
+          dropdown
+            .addOption("local", "本地（Transformers.js）")
+            .addOption("api", "远程 API")
+            .setValue(this.plugin.settings.embeddingProvider)
+            .onChange(async (value) => {
+              this.plugin.settings.embeddingProvider = value as "api" | "local";
               await this.plugin.saveSettings();
-              new Notice(`已获取 ${models.length} 个 Embedding 模型${embeds.length ? "" : "（未匹配到 embed 关键字，已列出全部）"}`);
               this.display();
-            } catch (error) {
-              new Notice(ErrorFormatter.toNoticeText(ErrorFormatter.fromUnknown(error)));
+            })
+        );
+
+      if (this.plugin.settings.embeddingProvider === "api") {
+        this.addTextSetting(containerEl, "Embedding Base URL", "Embedding API", "https://api.openai.com/v1", "embeddingBaseUrl");
+
+        // Embedding 模型：下拉选择（来自缓存列表），刷新按钮拉取 Embedding Base URL 的 GET /v1/models 并筛选含 "embed" 的模型
+        new Setting(containerEl)
+          .setName("Embedding Model")
+          .setDesc("Embedding 模型。填好 Embedding Base URL 与 API Key 后点右侧刷新，从该地址拉取并筛出 embedding 模型；列表会缓存。")
+          .addDropdown((dropdown) => {
+            const models = this.plugin.settings.cachedEmbeddingModels ?? [];
+            const current = this.plugin.settings.embeddingModel;
+            const options = models.length
+              ? (models.includes(current) ? models : [current, ...models].filter(Boolean))
+              : [current].filter(Boolean);
+
+            if (options.length === 0) {
+              dropdown.addOption("", "（请先刷新模型列表）");
+            } else {
+              for (const id of options) dropdown.addOption(id, id);
             }
-          })
-      );
 
-    // 也允许手动输入 Embedding 模型名
-    this.addTextSetting(containerEl, "Embedding Model（手动输入）", "下拉没有想要的模型时，可在此直接手敲。", "text-embedding-3-small", "embeddingModel");
-
-    new Setting(containerEl)
-      .setName("Embedding 运行方式")
-      .setDesc("local＝纯插件内跑（Transformers.js，离线、无 token 消耗）；api＝调用远程 Embedding 接口。切换后需重建索引。")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("local", "本地（Transformers.js）")
-          .addOption("api", "远程 API")
-          .setValue(this.plugin.settings.embeddingProvider)
-          .onChange(async (value) => {
-            this.plugin.settings.embeddingProvider = value as "api" | "local";
-            await this.plugin.saveSettings();
+            dropdown.setValue(current);
+            dropdown.onChange(async (value) => {
+              this.plugin.settings.embeddingModel = value;
+              await this.plugin.saveSettings();
+            });
           })
-      );
-    this.addTextSetting(containerEl, "本地 Embedding 模型", "Transformers.js 模型 ID（中文推荐 Xenova/bge-small-zh-v1.5）", "Xenova/bge-small-zh-v1.5", "localEmbeddingModel");
-    this.addTextSetting(containerEl, "本地模型目录", "离线模型与 wasm 存放的库内文件夹。模型放 <目录>/<模型ID>/，wasm 放 <目录>/_onnx_wasm/", "AI Copilot/models", "localModelPath");
+          .addExtraButton((button) =>
+            button
+              .setIcon("refresh-cw")
+              .setTooltip("刷新 Embedding 模型列表")
+              .onClick(async () => {
+                try {
+                  const all = await this.plugin.aiClient.listModels(this.plugin.settings.embeddingBaseUrl);
+                  const embeds = all.filter((id) => id.toLowerCase().includes("embed"));
+                  const models = embeds.length ? embeds : all;
+                  this.plugin.settings.cachedEmbeddingModels = models;
+                  this.plugin.settings.cachedEmbeddingModelsBaseUrl = this.plugin.settings.embeddingBaseUrl;
+                  if (models.length && !models.includes(this.plugin.settings.embeddingModel)) {
+                    this.plugin.settings.embeddingModel = models[0];
+                  }
+                  await this.plugin.saveSettings();
+                  new Notice(`已获取 ${models.length} 个 Embedding 模型${embeds.length ? "" : "（未匹配到 embed 关键字，已列出全部）"}`);
+                  this.display();
+                } catch (error) {
+                  new Notice(ErrorFormatter.toNoticeText(ErrorFormatter.fromUnknown(error)));
+                }
+              })
+          );
+
+        // 也允许手动输入 Embedding 模型名
+        this.addTextSetting(containerEl, "Embedding Model（手动输入）", "下拉没有想要的模型时，可在此直接手敲。", "text-embedding-3-small", "embeddingModel");
+      } else {
+        this.addTextSetting(containerEl, "本地 Embedding 模型", "Transformers.js 模型 ID（中文推荐 Xenova/bge-small-zh-v1.5）", "Xenova/bge-small-zh-v1.5", "localEmbeddingModel");
+        this.addTextSetting(containerEl, "本地模型目录", "离线模型与 wasm 存放的库内文件夹。模型放 <目录>/<模型ID>/，wasm 放 <目录>/_onnx_wasm/", "AI Copilot/models", "localModelPath");
+      }
+    }
   }
 
   renderPromptSettings(containerEl: HTMLElement) {
