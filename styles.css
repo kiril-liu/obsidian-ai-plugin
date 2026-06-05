@@ -262,9 +262,18 @@
   color: var(--text-normal);
 }
 
-.ai-chat-history-time {
-  font-size: 0.8em;
+/* AI 回答摘要（单行截断，取代旧的时间行） */
+.ai-chat-history-answer {
+  font-size: 0.85em;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 整条历史记录可点击恢复 */
+.ai-chat-history-item.is-clickable {
+  cursor: pointer;
 }
 
 /* 历史对话操作按钮 */
@@ -447,6 +456,27 @@
 .ai-chat-modal .ai-chat-input-actions {
   flex-shrink: 0;
   margin-left: 0;
+}
+
+/* 手机端：图标放大加粗，贴近原生工具栏观感（不影响桌面端） */
+.ai-chat-modal .ai-chat-icon-button {
+  --icon-size: 22px;
+  --icon-stroke: 1.75px;
+  padding: 8px;
+}
+
+.ai-chat-modal .ai-chat-icon-button svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.75px;
+}
+
+/* 文件名旁的关联开关、消息操作图标略小一档，仍比原来粗 */
+.ai-chat-modal .ai-chat-note-link-button svg,
+.ai-chat-modal .ai-chat-message-action svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.75px;
 }
 
 @keyframes ai-chat-slide-up {

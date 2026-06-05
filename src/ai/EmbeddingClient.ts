@@ -1,4 +1,4 @@
-import { Platform } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 import AiPlugin from "../main";
 import { ErrorFormatter } from "../errors/ErrorFormatter";
 
@@ -127,28 +127,31 @@ export class EmbeddingClient {
 		try {
 			const baseUrl = this.plugin.settings.embeddingBaseUrl || this.plugin.settings.baseUrl;
 
-			const response = await fetch(`${baseUrl}/embeddings`, {
+			// requestUrl 走 Electron 网络栈，绕过 CORS 并自动处理代理/证书（两端通用）。
+			// 注意：requestUrl 不支持 AbortSignal，signal 在此分支不生效（取消能力有限）。
+			const response = await requestUrl({
+				url: `${baseUrl}/embeddings`,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: `Bearer ${this.plugin.settings.apiKey}`,
 				},
-				signal,
 				body: JSON.stringify({
 					model: this.plugin.settings.embeddingModel,
 					input: inputs,
 				}),
+				throw: false,
 			});
 
-			if (!response.ok) {
-				throw ErrorFormatter.fromResponse(response.status, `Embedding error: ${await response.text()}`);
+			if (response.status < 200 || response.status >= 300) {
+				throw ErrorFormatter.fromResponse(response.status, `Embedding error: ${response.text}`);
 			}
 
-			const data = await response.json();
+			const data = response.json;
 
 			return [...(data.data ?? [])]
-				.sort((a, b) => a.index - b.index)
-				.map((item) => item.embedding as number[]);
+				.sort((a: any, b: any) => a.index - b.index)
+				.map((item: any) => item.embedding as number[]);
 		} catch (error) {
 			throw ErrorFormatter.fromUnknown(error);
 		}

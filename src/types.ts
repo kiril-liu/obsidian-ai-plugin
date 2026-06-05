@@ -7,10 +7,15 @@ export interface AiPluginSettings {
   apiKey: string;
   baseUrl: string;
   model: string;
+  maxTokens: number;
+  cachedModels: string[];
+  cachedModelsBaseUrl: string;
   vaultSearchMaxResults: number;
   vaultSearchMaxCharsPerResult: number;
   embeddingBaseUrl: string;
   embeddingModel: string;
+  cachedEmbeddingModels: string[];
+  cachedEmbeddingModelsBaseUrl: string;
   embeddingProvider: "api" | "local";
   localEmbeddingModel: string;
   localModelPath: string;

@@ -1,15 +1,21 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import AiPlugin from "./main";
 import { AiPluginSettings } from "./types";
+import { ErrorFormatter } from "./errors/ErrorFormatter";
 
 export const DEFAULT_SETTINGS: AiPluginSettings = {
   apiKey: "",
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4o-mini",
+  maxTokens: 0,
+  cachedModels: [],
+  cachedModelsBaseUrl: "",
   vaultSearchMaxResults: 6,
   vaultSearchMaxCharsPerResult: 1200,
   embeddingBaseUrl: "https://api.openai.com/v1",
   embeddingModel: "text-embedding-3-small",
+  cachedEmbeddingModels: [],
+  cachedEmbeddingModelsBaseUrl: "",
   embeddingProvider: "local",
   localEmbeddingModel: "Xenova/bge-small-zh-v1.5",
   localModelPath: "AI Copilot/models",
@@ -68,11 +74,136 @@ export class AiSettingsTab extends PluginSettingTab {
 
   renderModelSettings(containerEl: HTMLElement) {
     containerEl.createEl("h3", { text: "模型" });
+
     this.addTextSetting(containerEl, "API Key", "AI 服务密钥", "sk-...", "apiKey");
+
+    // 厂商预设：选中后自动填入对应 Base URL（都是 OpenAI 兼容接口）
+    const presets: Record<string, string> = {
+      "OpenAI": "https://api.openai.com/v1",
+      "NVIDIA": "https://integrate.api.nvidia.com/v1",
+      "DeepSeek": "https://api.deepseek.com/v1",
+      "Ollama（本地）": "http://localhost:11434/v1"
+    };
+
+    new Setting(containerEl)
+      .setName("厂商预设")
+      .setDesc("选择后自动填入对应 Base URL；也可在下方手动修改。各家均为 OpenAI 兼容接口。")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("", "自定义");
+        for (const name of Object.keys(presets)) dropdown.addOption(name, name);
+        const current = Object.keys(presets).find((name) => presets[name] === this.plugin.settings.baseUrl) ?? "";
+        dropdown.setValue(current);
+        dropdown.onChange(async (value) => {
+          if (value && presets[value]) {
+            this.plugin.settings.baseUrl = presets[value];
+            await this.plugin.saveSettings();
+            this.display();
+          }
+        });
+      });
+
     this.addTextSetting(containerEl, "Base URL", "OpenAI-compatible API", "https://api.openai.com/v1", "baseUrl");
-    this.addTextSetting(containerEl, "Model", "聊天模型", "gpt-4o-mini", "model");
+
+    // 模型：下拉选择（来自缓存列表），右侧刷新按钮拉取 GET /v1/models，列表持久化
+    new Setting(containerEl)
+      .setName("Model")
+      .setDesc("聊天模型。填好 Base URL 与 API Key 后点右侧刷新拉取可用模型；列表会缓存，下次直接用。")
+      .addDropdown((dropdown) => {
+        const models = this.plugin.settings.cachedModels ?? [];
+        const current = this.plugin.settings.model;
+        const options = models.length
+          ? (models.includes(current) ? models : [current, ...models].filter(Boolean))
+          : [current].filter(Boolean);
+
+        if (options.length === 0) {
+          dropdown.addOption("", "（请先刷新模型列表）");
+        } else {
+          for (const id of options) dropdown.addOption(id, id);
+        }
+
+        dropdown.setValue(current);
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.model = value;
+          await this.plugin.saveSettings();
+        });
+      })
+      .addExtraButton((button) =>
+        button
+          .setIcon("refresh-cw")
+          .setTooltip("刷新模型列表")
+          .onClick(async () => {
+            try {
+              const models = await this.plugin.aiClient.listModels();
+              this.plugin.settings.cachedModels = models;
+              this.plugin.settings.cachedModelsBaseUrl = this.plugin.settings.baseUrl;
+              if (models.length && !models.includes(this.plugin.settings.model)) {
+                this.plugin.settings.model = models[0];
+              }
+              await this.plugin.saveSettings();
+              new Notice(`已获取 ${models.length} 个模型`);
+              this.display();
+            } catch (error) {
+              new Notice(ErrorFormatter.toNoticeText(ErrorFormatter.fromUnknown(error)));
+            }
+          })
+      );
+
+    // 也允许手动输入模型名（首次未刷新、或下拉里没有的私有模型）
+    this.addTextSetting(containerEl, "Model（手动输入）", "下拉没有想要的模型时，可在此直接手敲模型名。", "gpt-4o-mini", "model");
+
+    // max_tokens 不写死：填 0 表示不发送该参数，避免不同模型上限不同（32768 vs 16384）导致 400
+    this.addNumberSetting(containerEl, "Max tokens", "回复最大 token 数；填 0 表示不限制（不发送 max_tokens，避免切模型后报 400）。", "0", "maxTokens");
+
     this.addTextSetting(containerEl, "Embedding Base URL", "Embedding API", "https://api.openai.com/v1", "embeddingBaseUrl");
-    this.addTextSetting(containerEl, "Embedding Model", "Embedding 模型", "text-embedding-3-small", "embeddingModel");
+
+    // Embedding 模型：下拉选择（来自缓存列表），刷新按钮拉取 Embedding Base URL 的 GET /v1/models 并筛选含 "embed" 的模型
+    new Setting(containerEl)
+      .setName("Embedding Model")
+      .setDesc("Embedding 模型。填好 Embedding Base URL 与 API Key 后点右侧刷新，从该地址拉取并筛出 embedding 模型；列表会缓存。")
+      .addDropdown((dropdown) => {
+        const models = this.plugin.settings.cachedEmbeddingModels ?? [];
+        const current = this.plugin.settings.embeddingModel;
+        const options = models.length
+          ? (models.includes(current) ? models : [current, ...models].filter(Boolean))
+          : [current].filter(Boolean);
+
+        if (options.length === 0) {
+          dropdown.addOption("", "（请先刷新模型列表）");
+        } else {
+          for (const id of options) dropdown.addOption(id, id);
+        }
+
+        dropdown.setValue(current);
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.embeddingModel = value;
+          await this.plugin.saveSettings();
+        });
+      })
+      .addExtraButton((button) =>
+        button
+          .setIcon("refresh-cw")
+          .setTooltip("刷新 Embedding 模型列表")
+          .onClick(async () => {
+            try {
+              const all = await this.plugin.aiClient.listModels(this.plugin.settings.embeddingBaseUrl);
+              const embeds = all.filter((id) => id.toLowerCase().includes("embed"));
+              const models = embeds.length ? embeds : all;
+              this.plugin.settings.cachedEmbeddingModels = models;
+              this.plugin.settings.cachedEmbeddingModelsBaseUrl = this.plugin.settings.embeddingBaseUrl;
+              if (models.length && !models.includes(this.plugin.settings.embeddingModel)) {
+                this.plugin.settings.embeddingModel = models[0];
+              }
+              await this.plugin.saveSettings();
+              new Notice(`已获取 ${models.length} 个 Embedding 模型${embeds.length ? "" : "（未匹配到 embed 关键字，已列出全部）"}`);
+              this.display();
+            } catch (error) {
+              new Notice(ErrorFormatter.toNoticeText(ErrorFormatter.fromUnknown(error)));
+            }
+          })
+      );
+
+    // 也允许手动输入 Embedding 模型名
+    this.addTextSetting(containerEl, "Embedding Model（手动输入）", "下拉没有想要的模型时，可在此直接手敲。", "text-embedding-3-small", "embeddingModel");
 
     new Setting(containerEl)
       .setName("Embedding 运行方式")

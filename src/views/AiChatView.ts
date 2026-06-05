@@ -152,6 +152,7 @@ export class ChatPanel {
 		if (viewport && this.keyboardViewportHandler) {
 			viewport.removeEventListener("resize", this.keyboardViewportHandler);
 			viewport.removeEventListener("scroll", this.keyboardViewportHandler);
+			window.removeEventListener("resize", this.keyboardViewportHandler);
 			this.keyboardViewportHandler = null;
 		}
 		this.plugin.unregisterChatPanel(this);
@@ -170,6 +171,8 @@ export class ChatPanel {
 		this.keyboardViewportHandler = update;
 		viewport.addEventListener("resize", update);
 		viewport.addEventListener("scroll", update);
+		// 兜底：部分移动端 webview 不触发 visualViewport 事件，补一个 window resize 监听
+		window.addEventListener("resize", update);
 		update();
 	}
 
@@ -193,6 +196,8 @@ export class ChatPanel {
 			this.renderMessages();
 
 			await this.runSelectedPrompt(selectedPrompt);
+			// 发送后清除已选提示词：恢复输入框占位，提示词只对本次发送生效，不会一直挂在输入框
+			this.setSelectedPrompt(null, null);
 			return;
 		}
 
@@ -217,6 +222,8 @@ export class ChatPanel {
 
 		try {
 			const signal = this.plugin.progressTracker.start("AI Chat", ["准备上下文", "检索 Vault", "调用 AI", "显示结果"]);
+			// 立即把发送按钮置灰：Modal 面板不一定收到 tracker 的刷新回调，这里对当前面板主动刷新
+			this.renderProgress();
 			this.plugin.progressTracker.setStep("准备上下文");
 
 			const currentNoteContext = this.useCurrentNote ? await this.getCurrentNoteContext() : null;
@@ -332,12 +339,14 @@ export class ChatPanel {
 			this.plugin.progressTracker.setStep("显示结果");
 			this.plugin.progressTracker.complete("回答完成");
 			this.renderMessages();
+			this.renderProgress();
 			this.renderContextStatus();
 		} catch (error) {
 			const friendly = ErrorFormatter.fromUnknown(error);
 			this.plugin.progressTracker.fail(friendly.message);
 			new Notice(ErrorFormatter.toNoticeText(friendly));
 			this.renderMessages();
+			this.renderProgress();
 		}
 	}
 
@@ -504,6 +513,12 @@ export class ChatPanel {
 		this.selectedPromptFile = file;
 		this.selectedPromptName = name;
 		this.activePromptName = name ?? (this.useRag ? "普通提问 + Vault 检索" : "普通提问");
+		// 选中提示词后给输入框一个占位提示：可补充说明，留空则直接运行
+		if (this.inputEl) {
+			this.inputEl.placeholder = name
+				? `已选提示词「${name}」：可补充说明后发送，留空则直接运行`
+				: "输入问题，例如：总结这个页面，或输入 /每日复盘 调用 Prompt";
+		}
 		this.renderPromptFileButton();
 		this.renderContextStatus();
 	}
@@ -653,14 +668,27 @@ export class ChatPanel {
 
 		this.messagesEl.querySelectorAll(".ai-chat-scroll-spacer").forEach((el) => el.remove());
 
+		const target = this.messagesEl;
 		const toBottom = () => {
-			if (!this.messagesEl) return;
-			this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+			target.scrollTop = target.scrollHeight;
 		};
 
-		// 先滚一次；AI 消息的 Markdown 是异步渲染，等布局完成后再滚一次确保停在底部
+		// Markdown 异步渲染会持续改变高度，单帧滚动经常停不到底。
+		// 连续多帧 + ResizeObserver 监听高度变化，在布局稳定前持续贴底。
 		toBottom();
-		window.requestAnimationFrame(toBottom);
+		let frame = 0;
+		const tick = () => {
+			toBottom();
+			if (frame++ < 8) window.requestAnimationFrame(tick);
+		};
+		window.requestAnimationFrame(tick);
+
+		if (typeof ResizeObserver !== "undefined") {
+			const observer = new ResizeObserver(() => toBottom());
+			observer.observe(target);
+			// 监听一小段时间后断开，避免长期占用并干扰用户手动滚动
+			window.setTimeout(() => observer.disconnect(), 600);
+		}
 	}
 
 	renderMessage(message: ChatMessage) {
