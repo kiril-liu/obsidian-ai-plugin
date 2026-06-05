@@ -63,7 +63,7 @@ export class AiSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "AI Copilot 设置" });
+    new Setting(containerEl).setName("AI Copilot 设置").setHeading();
 
     this.renderModelSettings(containerEl);
     this.renderPromptSettings(containerEl);
@@ -73,7 +73,7 @@ export class AiSettingsTab extends PluginSettingTab {
   }
 
   renderModelSettings(containerEl: HTMLElement) {
-    containerEl.createEl("h3", { text: "模型" });
+    new Setting(containerEl).setName("模型").setHeading();
 
     this.addTextSetting(containerEl, "API Key", "AI 服务密钥", "sk-...", "apiKey");
 
@@ -223,7 +223,7 @@ export class AiSettingsTab extends PluginSettingTab {
   }
 
   renderPromptSettings(containerEl: HTMLElement) {
-    containerEl.createEl("h3", { text: "Prompt Library" });
+    new Setting(containerEl).setName("Prompt Library").setHeading();
     this.addToggleSetting(containerEl, "Enable prompt library", "启用提示词库", "enablePromptLibrary");
     this.addToggleSetting(containerEl, "Enable prompt folder", "读取提示词文件夹", "enablePromptFolder");
     this.addTextSetting(containerEl, "Prompt folder path", "提示词文件夹", "AI Copilot/Prompts", "promptFolderPath");
@@ -244,14 +244,14 @@ export class AiSettingsTab extends PluginSettingTab {
   }
 
   renderDailySettings(containerEl: HTMLElement) {
-    containerEl.createEl("h3", { text: "Daily Note" });
+    new Setting(containerEl).setName("Daily Note").setHeading();
     this.addTextSetting(containerEl, "Daily note folder", "Daily Note 文件夹", "Daily", "dailyNoteFolder");
     this.addTextSetting(containerEl, "Daily note date format", "支持 YYYY、MM、DD", "YYYY-MM-DD", "dailyNoteDateFormat");
     this.addNumberSetting(containerEl, "Recent daily notes days", "读取最近多少天", "7", "recentDailyNotesDays");
   }
 
   renderIndexSettings(containerEl: HTMLElement) {
-    containerEl.createEl("h3", { text: "索引与检索" });
+    new Setting(containerEl).setName("索引与检索").setHeading();
     this.addToggleSetting(containerEl, "External index storage", "索引保存到独立文件", "enableExternalIndexStorage");
     this.addTextSetting(containerEl, "Index storage folder", "索引文件夹", ".obsidian/plugins/obsidian-ai-copilot/index", "indexStorageFolder");
     this.addToggleSetting(containerEl, "Hybrid search", "混合检索", "enableHybridSearch");
@@ -270,7 +270,7 @@ export class AiSettingsTab extends PluginSettingTab {
   }
 
   renderWorkflowSettings(containerEl: HTMLElement) {
-    containerEl.createEl("h3", { text: "工作流" });
+    new Setting(containerEl).setName("工作流").setHeading();
     this.addToggleSetting(containerEl, "Register prompt commands", "模板注册为命令", "enablePromptCommandRegistration");
     this.addTextSetting(containerEl, "Workflow output folder", "输出文件夹", "AI Copilot/Outputs", "workflowOutputFolder");
     this.addNumberSetting(containerEl, "Prompt run history max", "历史条数", "100", "promptRunHistoryMaxEntries");

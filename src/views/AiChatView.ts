@@ -165,7 +165,7 @@ export class ChatPanel {
 
 		const update = () => {
 			const keyboardHeight = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
-			this.containerEl.style.setProperty("--ai-chat-keyboard-height", `${keyboardHeight}px`);
+			this.containerEl.setCssProps({ "--ai-chat-keyboard-height": `${keyboardHeight}px` });
 		};
 
 		this.keyboardViewportHandler = update;
@@ -313,7 +313,6 @@ export class ChatPanel {
 			// 流式输出：先建一个临时气泡，token 到达时实时更新
 			const streamEl = this.messagesEl.createDiv("ai-chat-message ai-chat-message-ai is-streaming");
 			const streamBubble = streamEl.createDiv("ai-chat-bubble");
-			streamBubble.style.whiteSpace = "pre-wrap";
 			this.scrollLatestUserMessageToTop();
 
 			let answer = "";
@@ -656,7 +655,7 @@ export class ChatPanel {
 
 		if (needed > 0) {
 			const spacer = this.messagesEl.createDiv("ai-chat-scroll-spacer");
-			spacer.style.height = `${needed}px`;
+			spacer.setCssStyles({ height: `${needed}px` });
 		}
 
 		this.messagesEl.scrollTop = last.offsetTop;
@@ -792,7 +791,6 @@ export class ChatPanel {
 		if (!state || !state.active) {
 			this.progressPercentEl.setText("");
 			this.progressPercentEl.removeClass("is-active");
-			this.progressPercentEl.style.display = "none";
 			return;
 		}
 
@@ -804,7 +802,6 @@ export class ChatPanel {
 			: 0;
 		const clamped = Math.max(0, Math.min(100, percent));
 
-		this.progressPercentEl.style.display = "";
 		this.progressPercentEl.addClass("is-active");
 		this.progressPercentEl.setText(`${clamped}%`);
 		this.progressPercentEl.setAttribute("aria-label", state.currentStep ?? state.title);

@@ -90,6 +90,11 @@
   margin-bottom: 0;
 }
 
+/* 流式输出临时气泡：按原始 token 预格式显示，渲染完成后再交给 Markdown */
+.ai-chat-message.is-streaming .ai-chat-bubble {
+  white-space: pre-wrap;
+}
+
 .ai-chat-message-actions {
   display: flex;
   gap: 6px;
@@ -209,13 +214,18 @@
   height: 16px;
 }
 
-/* 顶部行内进度:仅百分比 */
+/* 顶部行内进度:仅百分比（默认隐藏，运行中加 .is-active 显示） */
 .ai-chat-progress-percent {
+  display: none;
   flex-shrink: 0;
   font-size: 0.8em;
   font-weight: 600;
   color: var(--interactive-accent);
   font-variant-numeric: tabular-nums;
+}
+
+.ai-chat-progress-percent.is-active {
+  display: inline;
 }
 
 /* ===== 历史对话弹窗 ===== */

@@ -102,7 +102,8 @@ export default class AiPlugin extends Plugin {
 	}
 
 	onunload() {
-		this.app.workspace.detachLeavesOfType(AI_CHAT_VIEW_TYPE);
+		// 不要在 onunload 里 detach 视图：会让用户手动移动过的视图在下次加载时
+		// 被重置回默认位置。Obsidian 会自动回收已注册的视图。
 	}
 
 	async saveSettings() {
