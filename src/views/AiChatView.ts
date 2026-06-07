@@ -37,6 +37,8 @@ export class ChatPanel {
 	promptTemplates: PromptTemplate[] = [];
 	noteActionManager: NoteActionManager;
 	renderedMessages: ChatMessage[] = [];
+	// 是否已经渲染过一次消息：首次打开聊天框（含挂载时已有历史）按“看最新”处理，滚到底部
+	hasRenderedMessages = false;
 	keyboardShowHandler: ((event: Event) => void) | null = null;
 	keyboardHideHandler: (() => void) | null = null;
 
@@ -648,13 +650,42 @@ export class ChatPanel {
 		}
 
 		this.renderedMessages = [...history];
-		// 整体重建（如恢复历史对话）：滚到底部显示最新消息；
+
+		// 首次渲染（首次打开聊天框，包括挂载时已有历史）也按“看最新”处理
+		const isFirstRender = !this.hasRenderedMessages;
+		this.hasRenderedMessages = true;
+
+		// 整体重建（如恢复历史对话）或首次打开：滚到底部显示最新消息；
 		// 增量追加（正常提问）：把最新提问顶到顶部，便于阅读其下方的回答。
-		if (rebuilt) {
+		if (rebuilt || isFirstRender) {
 			this.scrollToBottom();
 		} else {
 			this.scrollLatestUserMessageToTop();
 		}
+	}
+
+	// 找到真正发生滚动的容器：从消息区向上找第一个可滚动祖先
+	// （桌面通常是消息区本身，手机弹层里可能是 .ai-chat-body），找不到则退回消息区。
+	getScrollContainer(): HTMLElement {
+		let el: HTMLElement | null = this.messagesEl;
+		while (el && el !== document.body) {
+			const overflowY = getComputedStyle(el).overflowY;
+			if (
+				(overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
+				el.scrollHeight > el.clientHeight
+			) {
+				return el;
+			}
+			el = el.parentElement;
+		}
+		return this.messagesEl;
+	}
+
+	// 顶部/底部留白：直接读取消息区的 padding-bottom（CSS 单一来源），
+	// 这样“我的消息距顶部”与“AI 回答距底部”用的是同一个值，改 CSS 即可同步调整。
+	getEdgeGap(): number {
+		const pad = parseFloat(getComputedStyle(this.messagesEl).paddingBottom);
+		return Number.isFinite(pad) && pad > 0 ? pad : 14;
 	}
 
 	scrollLatestUserMessageToTop() {
@@ -665,31 +696,40 @@ export class ChatPanel {
 
 		const userMessages = this.messagesEl.querySelectorAll<HTMLElement>(".ai-chat-message-user");
 		const last = userMessages[userMessages.length - 1];
+		const scroller = this.getScrollContainer();
 
 		if (!last) {
-			this.messagesEl.scrollTop = 0;
+			scroller.scrollTop = 0;
 			return;
 		}
 
-		// 要让最新消息能滚到顶部，需要 scrollHeight >= last.offsetTop + clientHeight。
+		const gap = this.getEdgeGap();
+		// 最新消息在滚动容器内容里的绝对偏移（不受当前滚动位置影响）
+		const offsetWithinScroller =
+			last.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+		// 不贴顶，留出和底部相同的一点点距离
+		const targetTop = Math.max(0, offsetWithinScroller - gap);
+
+		// 要让最新消息能停在距顶部 gap 处，需要 scrollHeight >= targetTop + clientHeight。
 		// 内容不够时，补一个底部占位块。
-		const needed = last.offsetTop + this.messagesEl.clientHeight - this.messagesEl.scrollHeight;
+		const needed = targetTop + scroller.clientHeight - scroller.scrollHeight;
 
 		if (needed > 0) {
 			const spacer = this.messagesEl.createDiv("ai-chat-scroll-spacer");
 			spacer.setCssStyles({ height: `${needed}px` });
 		}
 
-		this.messagesEl.scrollTop = last.offsetTop;
+		scroller.scrollTop = targetTop;
 	}
 
-	// 滚动到消息区底部（用于恢复历史对话：直接看到最新消息，而不是从顶部开始）
+	// 滚动到消息区底部（用于恢复历史对话/首次打开：直接看到最新的 AI 回答，
+	// 回答结尾停在底部偏上一点点——底部留白由消息区的 padding-bottom 提供，与顶部留白相等）
 	scrollToBottom() {
 		if (!this.messagesEl) return;
 
 		this.messagesEl.querySelectorAll(".ai-chat-scroll-spacer").forEach((el) => el.remove());
 
-		const target = this.messagesEl;
+		const target = this.getScrollContainer();
 		const toBottom = () => {
 			target.scrollTop = target.scrollHeight;
 		};
