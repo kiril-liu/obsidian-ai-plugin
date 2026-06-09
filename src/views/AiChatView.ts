@@ -39,6 +39,8 @@ export class ChatPanel {
 	renderedMessages: ChatMessage[] = [];
 	// 是否已经渲染过一次消息：首次打开聊天框（含挂载时已有历史）按“看最新”处理，滚到底部
 	hasRenderedMessages = false;
+	// 置顶只做一次：为 true 时本次 renderMessages 不再强制滚动，用于 AI 回答结束后保留用户流式过程中的滚动位置
+	suppressAutoScroll = false;
 	keyboardShowHandler: ((event: Event) => void) | null = null;
 	keyboardHideHandler: (() => void) | null = null;
 
@@ -330,7 +332,7 @@ export class ChatPanel {
 				answer = full;
 				const { cleaned } = NoteActionManager.parse(full);
 				streamBubble.setText(cleaned || full);
-				this.scrollLatestUserMessageToTop();
+				// 不再每个 token 都置顶：发送时已置顶一次，AI 回答期间让用户能自由滚动查看流式输出
 			});
 
 			const { action, cleaned } = NoteActionManager.parse(answer);
@@ -347,6 +349,8 @@ export class ChatPanel {
 
 			this.plugin.progressTracker.setStep("显示结果");
 			this.plugin.progressTracker.complete("回答完成");
+			// 回答结束后不要把消息重新顶到顶部，保留用户在流式过程中的滚动位置
+			this.suppressAutoScroll = true;
 			this.renderMessages();
 			this.renderProgress();
 			this.renderContextStatus();
@@ -657,9 +661,12 @@ export class ChatPanel {
 
 		// 整体重建（如恢复历史对话）或首次打开：滚到底部显示最新消息；
 		// 增量追加（正常提问）：把最新提问顶到顶部，便于阅读其下方的回答。
+		// suppressAutoScroll 为 true 时（如 AI 回答结束后）不强制滚动，保留用户当前滚动位置。
+		const suppress = this.suppressAutoScroll;
+		this.suppressAutoScroll = false;
 		if (rebuilt || isFirstRender) {
 			this.scrollToBottom();
-		} else {
+		} else if (!suppress) {
 			this.scrollLatestUserMessageToTop();
 		}
 	}
